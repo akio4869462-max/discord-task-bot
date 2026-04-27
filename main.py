@@ -34,6 +34,36 @@ class MainMenuView(View):
         response = study_logic.get_math_quiz()
         await interaction.response.send_message(response)
 
+    @discord.ui.button(label="タスク完了", style=discord.ButtonStyle.danger)
+    async def complete_menu_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        count = task_logic.get_task_count()
+        if count == 0:
+            await interaction.response.send_message("完了するタスクがありません。", ephemeral=True)
+        else:
+            view = TaskCompleteView(count)
+            await interaction.response.send_message("完了するタスクの番号を押してください：", view=view, ephemeral=True)
+
+# --- タスク完了選択用のビュー ---
+class TaskCompleteView(View):
+    def __init__(self, count):
+        super().__init__(timeout=60)
+        # タスクの数だけボタンを自動生成
+        for i in range(count):
+            # ボタンのラベルは「1」「2」...
+            button = Button(label=f"{i+1}", style=discord.ButtonStyle.danger)
+            # ボタンが押された時の処理を紐付け
+            button.callback = self.create_callback(i)
+            self.add_item(button)
+
+    def create_callback(self, index):
+        async def callback(interaction: discord.Interaction):
+            # 実際の削除処理
+            result_msg = task_logic.complete_task(str(index + 1))
+            await interaction.response.send_message(result_msg, ephemeral=True)
+            # メッセージ自体を更新してボタンを消す場合は以下（任意）
+            # await interaction.message.edit(view=None)
+        return callback
+
 @client.event
 async def on_ready():
     print(f'{client.user} が起動しました。')

@@ -41,3 +41,15 @@ def complete_task(number_str):
             return 'その番号のタスクは見つかりません。'
     except ValueError:
         return '番号を正しく入力してください（例: !done 1）'
+
+def get_task_count():
+    """現在のタスクの総数を返す（ボタンをいくつ作るか決めるために使用）"""
+    todo_list = load_data()
+    return len(todo_list)
+
+def get_task_text(index):
+    """指定されたインデックスのタスク内容を返す（確認用）"""
+    todo_list = load_data()
+    if 0 <= index < len(todo_list):
+        return todo_list[index]
+    return None
