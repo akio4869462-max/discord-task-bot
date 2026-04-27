@@ -1,8 +1,10 @@
 import discord
 import os
 from dotenv import load_dotenv
-import task_logic   # 追加
-import study_logic  # 追加
+import task_logic
+import study_logic
+
+from discord.ui import Button, View
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -10,6 +12,27 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+
+# --- ボタンを管理するクラス ---
+class MainMenuView(View):
+    def __init__(self):
+        super().__init__(timeout=None) # タイムアウトなし
+
+    @discord.ui.button(label="タスク一覧", style=discord.ButtonStyle.primary)
+    async def list_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # task_logicから一覧を取得して返信
+        response = task_logic.list_tasks()
+        await interaction.response.send_message(response, ephemeral=True) # ephemeral=Trueは自分にだけ見える
+
+    @discord.ui.button(label="用語クイズ", style=discord.ButtonStyle.success)
+    async def kiso_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        response = study_logic.get_kiso_quiz()
+        await interaction.response.send_message(response)
+
+    @discord.ui.button(label="計算問題", style=discord.ButtonStyle.secondary)
+    async def math_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        response = study_logic.get_math_quiz()
+        await interaction.response.send_message(response)
 
 @client.event
 async def on_ready():
@@ -21,6 +44,11 @@ async def on_message(message):
         return
 
     content = message.content
+
+    # 【メニュー表示】
+    if content == '!menu' or content == '！': # 全角の「！」でも反応するようにするとスマホで楽です
+        view = MainMenuView()
+        await message.channel.send("メニューを選んでください：", view=view)
 
     # --- タスク管理系 ---
     if content.startswith('!add '):
@@ -41,5 +69,9 @@ async def on_message(message):
 
     elif content.startswith('!kiso_add '):
         await message.channel.send(study_logic.add_kiso_word(content[10:]))
+
+    elif content.startswith('!search '):
+        word = content[8:] # "!search " の後を取り出す
+        await message.channel.send(study_logic.search_glossary(word))
 
 client.run(TOKEN)

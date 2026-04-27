@@ -53,3 +53,23 @@ def add_kiso_word(content):
         return f'📖 用語「{term}」を登録しました！'
     else:
         return '形式が違います。「!kiso_add 用語/解説」と入力してください。'
+
+def search_glossary(word):
+    if not os.path.exists('glossary.json'):
+        return "用語データが見つかりません。"
+    
+    with open('glossary.json', 'r', encoding='utf-8') as f:
+        glossary = json.load(f)
+    
+    # 用語集の中から、入力された単語と一致するものを探す
+    # 部分一致（その言葉が含まれているか）にするとより便利です
+    results = [qa for qa in glossary if word.lower() in qa['term'].lower()]
+    
+    if not results:
+        return f"「{word}」に関する用語は見つかりませんでした。"
+    
+    # 見つかったものを整形して返す
+    response = f"🔍 「{word}」の検索結果 ({len(results)}件):\n"
+    for qa in results:
+        response += f"**【{qa['term']}】**\n{qa['desc']}\n"
+    return response
