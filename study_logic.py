@@ -31,28 +31,23 @@ def get_math_quiz():
     else:
         return f"16進数「{format(target_num, '02X')}」を 2進数(8bit) に直すと？\n答え: || {format(target_num, '08b')} ||"
 
-def add_kiso_word(content):
-    # 「/」で用語と解説を分割
-    if '/' in content:
-        term, desc = content.split('/', 1)
-        
-        # 現在のデータを読み込む
-        glossary = []
-        if os.path.exists('glossary.json'):
-            with open('glossary.json', 'r', encoding='utf-8') as f:
-                glossary = json.load(f)
-        
-        # 新しい辞書データを作ってリストに追加
-        new_data = {"term": term.strip(), "desc": desc.strip()}
-        glossary.append(new_data)
-        
-        # ファイルに保存
-        with open('glossary.json', 'w', encoding='utf-8') as f:
-            json.dump(glossary, f, ensure_ascii=False, indent=4)
-            
-        return f'📖 用語「{term}」を登録しました！'
-    else:
-        return '形式が違います。「!kiso_add 用語/解説」と入力してください。'
+def add_kiso(term, desc): # 引数を2つ（term と desc）にする
+    # 以前のように split('/') する必要がなくなります
+    if not term or not desc:
+        return "用語と説明を両方入力してください。"
+
+    glossary = []
+    if os.path.exists('glossary.json'):
+        with open('glossary.json', 'r', encoding='utf-8') as f:
+            glossary = json.load(f)
+
+    # データを追加
+    glossary.append({"term": term, "desc": desc})
+
+    with open('glossary.json', 'w', encoding='utf-8') as f:
+        json.dump(glossary, f, ensure_ascii=False, indent=4)
+
+    return f"✅ 用語「{term}」を登録しました！"
 
 def search_glossary(word):
     if not os.path.exists('glossary.json'):

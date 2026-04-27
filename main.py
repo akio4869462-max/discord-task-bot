@@ -31,6 +31,11 @@ class StudyMenuView(View):
     async def math_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(study_logic.get_math_quiz())
 
+    @discord.ui.button(label="用語を追加", style=discord.ButtonStyle.primary, emoji="➕")
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # ボタンを押すと入力フォーム（モーダル）が表示される
+        await interaction.response.send_modal(KisoAddModal())
+
     @discord.ui.button(label="25分タイマー開始", style=discord.ButtonStyle.secondary, emoji="⏱️")
     async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         # タイマー開始を自分にだけ通知
@@ -112,6 +117,28 @@ class TaskCompleteView(View):
             # メッセージ自体を更新してボタンを消す場合は以下（任意）
             # await interaction.message.edit(view=None)
         return callback
+
+# --- 用語追加用の入力フォーム ---
+class KisoAddModal(discord.ui.Modal, title='新しい用語の登録'):
+    # 入力項目（1行のテキスト入力）
+    term = discord.ui.TextInput(
+        label='用語名',
+        placeholder='例: CPU',
+        required=True,
+    )
+    # 入力項目（複数行のテキスト入力）
+    desc = discord.ui.TextInput(
+        label='用語の説明',
+        style=discord.TextStyle.paragraph,
+        placeholder='例: コンピュータの制御や演算を行う中心的な装置。',
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # フォームが送信された時の処理（study_logicの関数を呼び出す）
+        # もし既存の add_kiso が引数2つを想定しているなら、それに合わせます
+        result = study_logic.add_kiso(self.term.value, self.desc.value)
+        await interaction.response.send_message(result, ephemeral=True)
 
 @client.event
 async def on_ready():
