@@ -68,3 +68,63 @@ def search_glossary(word):
     for qa in results:
         response += f"**【{qa['term']}】**\n{qa['desc']}\n"
     return response
+
+PLAYER_DATA_FILE = 'player_data.json'
+
+def load_player_data():
+    if os.path.exists(PLAYER_DATA_FILE):
+        with open(PLAYER_DATA_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    # 初期データ
+    return {"level": 1, "exp": 0, "tech": 0, "mgmt": 0, "strat": 0, "bquest": 0}
+
+def get_status_summary():
+    data = load_player_data()
+    # 簡易的なステータス文字列を返す
+    msg = f"🏆 **現在のランク: Lv.{data['level']}**\n"
+    msg += f"累計経験値: {data['exp']} EXP\n\n"
+    msg += f"・テクノロジ: {data['tech']} pt\n"
+    msg += f"・マネジメント: {data['mgmt']} pt\n"
+    msg += f"・ストラテジ: {data['strat']} pt\n"
+    msg += f"・B問題: {data['bquest']} pt"
+    return msg
+
+def add_exp(category, amount=10):
+    """
+    経験値を加算して保存する関数
+    category: 'tech', 'mgmt', 'strat', 'bquest' のいずれか
+    amount: 加算する数値（デフォルトは10）
+    """
+    data = load_player_data()
+    
+    # 指定されたカテゴリと合計EXPに加算
+    if category in data:
+        data[category] += amount
+    data['exp'] += amount
+    
+    # レベルアップ判定（例：100EXPごとに1レベル上がる）
+    new_level = (data['exp'] // 100) + 1
+    if new_level > data['level']:
+        data['level'] = new_level
+        is_level_up = True
+    else:
+        is_level_up = False
+        
+    # ファイルに保存
+    with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        
+    return is_level_up, data['level']
+
+def report_study(category, count):
+    """
+    自己申告された問題数に応じて経験値を加算する
+    1問 = 10 EXP として計算
+    """
+    exp_per_question = 10
+    total_earned = count * exp_per_question
+    
+    # 前に作った add_exp を使って加算
+    is_up, new_lv = add_exp(category, total_earned)
+    
+    return is_up, new_lv, total_earned

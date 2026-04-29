@@ -19,6 +19,13 @@ class StudyMenuView(View):
         super().__init__(timeout=60)
 
     # 全ての関数に "button" 引数を追加します
+        # StudyMenuView クラスの中に追加
+    @discord.ui.button(label="📝 学習を報告する", style=discord.ButtonStyle.primary)
+    async def report_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 報告用の専用メニュー（分野選択）を表示
+        view = StudyReportView()
+        await interaction.response.send_message("どの分野を学習しましたか？", view=view, ephemeral=True)
+
     @discord.ui.button(label="用語検索", style=discord.ButtonStyle.primary)
     async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("`!s 用語` の形式でチャットに入力してください。", ephemeral=True)
@@ -97,6 +104,18 @@ class MainMenuView(View):
         else:
             await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
 
+    # MainMenuView クラスの中に追加
+    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger)
+    async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # study_logic から現在のステータスを取得
+        status_msg = study_logic.get_status_summary()
+        
+        # 演出用の Embed（埋め込み）メッセージを作成
+        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険の記録", color=0xffd700)
+        embed.description = status_msg
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # --- タスク完了選択用のビュー ---
 class TaskCompleteView(View):
     def __init__(self, count):
@@ -139,6 +158,64 @@ class KisoAddModal(discord.ui.Modal, title='新しい用語の登録'):
         # もし既存の add_kiso が引数2つを想定しているなら、それに合わせます
         result = study_logic.add_kiso(self.term.value, self.desc.value)
         await interaction.response.send_message(result, ephemeral=True)
+
+# 新しく追加する報告用ビュー
+class StudyReportView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    
+    # 分野ごとにボタンを作成
+    @discord.ui.button(label="テクノロジ", style=discord.ButtonStyle.secondary)
+    async def tech_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_report(interaction, "tech", "テクノロジ")
+
+    @discord.ui.button(label="マネジメント", style=discord.ButtonStyle.secondary)
+    async def mgmt_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_report(interaction, "mgmt", "マネジメント")
+
+    @discord.ui.button(label="ストラテジ", style=discord.ButtonStyle.secondary)
+    async def strat_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_report(interaction, "strat", "ストラテジ")
+
+    @discord.ui.button(label="B問題", style=discord.ButtonStyle.secondary)
+    async def bquest_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.process_report(interaction, "bquest", "B問題")
+
+    # StudyReportView クラスの中の関数を書き換え
+    async def process_report(self, interaction, cat_id, cat_name):
+        # ボタンを押すと、数字を入力する画面（モーダル）を表示する
+        await interaction.response.send_modal(StudyReportModal(cat_id, cat_name))
+
+# --- 学習数入力用のフォーム ---
+class StudyReportModal(discord.ui.Modal):
+    def __init__(self, cat_id, cat_name):
+        super().__init__(title=f'{cat_name}の学習報告')
+        self.cat_id = cat_id
+        self.cat_name = cat_name
+
+    # 入力項目（1行のテキスト入力）
+    count_input = discord.ui.TextInput(
+        label='解いた問題数を入力してください',
+        placeholder='例: 10',
+        min_length=1,
+        max_length=3,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # 入力された値が数字かどうかチェック
+        if not self.count_input.value.isdigit():
+            await interaction.response.send_message("数字で入力してください！", ephemeral=True)
+            return
+
+        count = int(self.count_input.value)
+        # study_logicの関数を呼び出す（先ほど作った report_study を使用）
+        is_up, lv, earned = study_logic.report_study(self.cat_id, count)
+        
+        msg = f"✅ {self.cat_name}の学習（{count}問分）を記録しました！\n+{earned} EXP 獲得！"
+        if is_up:
+            msg += f"\n🎊 レベルアップ！ Lv.{lv} になりました！"
+        
+        await interaction.response.send_message(msg, ephemeral=True)
 
 @client.event
 async def on_ready():
