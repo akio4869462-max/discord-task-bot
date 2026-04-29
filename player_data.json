@@ -1,8 +1,8 @@
 {
-    "level": 3,
-    "exp": 200,
-    "tech": 50,
-    "mgmt": 100,
+    "level": 1,
+    "exp": 0,
+    "tech": 0,
+    "mgmt": 0,
     "strat": 0,
-    "bquest": 50
+    "bquest": 0
 }

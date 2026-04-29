@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import math
 
 # 【基本情報用語クイズ】
 def get_kiso_quiz():
@@ -80,13 +81,38 @@ def load_player_data():
 
 def get_status_summary():
     data = load_player_data()
-    # 簡易的なステータス文字列を返す
-    msg = f"🏆 **現在のランク: Lv.{data['level']}**\n"
-    msg += f"累計経験値: {data['exp']} EXP\n\n"
+    current_exp = data['exp']
+    
+    # 1. 新しい計算式でレベルを算出
+    # レベル = √(累計EXP / 100) + 1
+    level = int(math.sqrt(current_exp / 100)) + 1
+    
+    # 2. 次のレベルに必要な累計EXPと、現在のレベルの開始地点
+    next_level = level + 1
+    exp_for_current_level = ((level - 1) ** 2) * 100
+    exp_for_next_level = ((next_level - 1) ** 2) * 100
+    
+    # 3. 現在のレベル内での進捗計算
+    exp_in_level = current_exp - exp_for_current_level
+    needed_in_level = exp_for_next_level - exp_for_current_level
+    progress_percent = (exp_in_level / needed_in_level)
+    
+    # 4. 進捗バーの作成 [#####-----]
+    bar_length = 10
+    filled_length = int(bar_length * progress_percent)
+    bar = '█' * filled_length + '░' * (bar_length - filled_length)
+    
+    # 5. メッセージの組み立て
+    msg = f"🏆 **現在のランク: Lv.{level}**\n"
+    msg += f"進捗: `{bar}` {int(progress_percent * 100)}%\n"
+    msg += f"（次のLv.{next_level}まで あと {exp_for_next_level - current_exp} EXP）\n"
+    msg += f"累計経験値: {current_exp} EXP\n\n"
+    
     msg += f"・テクノロジ: {data['tech']} pt\n"
     msg += f"・マネジメント: {data['mgmt']} pt\n"
     msg += f"・ストラテジ: {data['strat']} pt\n"
     msg += f"・B問題: {data['bquest']} pt"
+    
     return msg
 
 def add_exp(category, amount=10):
