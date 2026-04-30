@@ -79,68 +79,87 @@ def load_player_data():
     # 初期データ
     return {"level": 1, "exp": 0, "tech": 0, "mgmt": 0, "strat": 0, "bquest": 0}
 
+def save_player_data(data):
+    """引数で受け取った辞書データをJSONファイルに書き込む"""
+    with open(PLAYER_DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
 def get_status_summary():
     data = load_player_data()
     current_exp = data['exp']
     
-    # 1. 新しい計算式でレベルを算出
-    # レベル = √(累計EXP / 100) + 1
-    level = int(math.sqrt(current_exp / 100)) + 1
-    
-    # 2. 次のレベルに必要な累計EXPと、現在のレベルの開始地点
+    # 1. 現在のレベルと次のレベルの境界を計算
+    level = data['level']
     next_level = level + 1
+    
+    # 現在のレベルの開始地点と、次のレベルに必要な累計EXP
     exp_for_current_level = ((level - 1) ** 2) * 100
     exp_for_next_level = ((next_level - 1) ** 2) * 100
     
-    # 3. 現在のレベル内での進捗計算
-    exp_in_level = current_exp - exp_for_current_level
+    # 2. 進捗バーの計算（全体経験値ベース）
+    exp_in_level = max(0, current_exp - exp_for_current_level)
     needed_in_level = exp_for_next_level - exp_for_current_level
-    progress_percent = (exp_in_level / needed_in_level)
+    # バーが100%を超えないように制御
+    progress_percent = min(1.0, exp_in_level / needed_in_level)
     
-    # 4. 進捗バーの作成 [#####-----]
     bar_length = 10
     filled_length = int(bar_length * progress_percent)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
     
-    # 5. メッセージの組み立て
-    msg = f"🏆 **現在のランク: Lv.{level}**\n"
-    msg += f"進捗: `{bar}` {int(progress_percent * 100)}%\n"
-    msg += f"（次のLv.{next_level}まで あと {exp_for_next_level - current_exp} EXP）\n"
-    msg += f"累計経験値: {current_exp} EXP\n\n"
+    # 3. 称号とノルマ判定の取得
+    # title = get_title(data)
+    is_eligible, diffs, _ = check_level_up(data)
     
-    msg += f"・テクノロジ: {data['tech']} pt\n"
-    msg += f"・マネジメント: {data['mgmt']} pt\n"
-    msg += f"・ストラテジ: {data['strat']} pt\n"
-    msg += f"・B問題: {data['bquest']} pt"
+    # 4. メッセージの組み立て
+    msg = f"🏆 **現在のランク: Lv.{level}**\n"
+    # msg += f"称号: **{title}**\n"
+    msg += f"進捗: `{bar}` {int(progress_percent * 100)}%\n\n"
+    
+    # 5. 不足分の表示（二段構え判定）
+    if diffs:
+        msg += "📝 **レベルアップへの不足分:**\n"
+        names = {
+            "total_exp": "全体経験値",
+            "tech": "テクノロジ",
+            "mgmt": "マネジメント",
+            "strat": "ストラテジ"
+        }
+        for cat, val in diffs.items():
+            msg += f" ・{names.get(cat, cat)}: あと {val} pt\n"
+    else:
+        msg += "✨ **ノルマ達成！次のレベルへ昇格可能です**\n"
+    
+    msg += f"\n📊 **現在の詳細ステータス:**\n"
+    msg += f" ・累計経験値: {current_exp} EXP\n"
+    msg += f" ・テクノロジ: {data['tech']} pt\n"
+    msg += f" ・マネジメント: {data['mgmt']} pt\n"
+    msg += f" ・ストラテジ: {data['strat']} pt\n"
+    msg += f" ・B問題対策: {data['bquest']} pt"
     
     return msg
 
 def add_exp(category, amount=10):
-    """
-    経験値を加算して保存する関数
-    category: 'tech', 'mgmt', 'strat', 'bquest' のいずれか
-    amount: 加算する数値（デフォルトは10）
-    """
     data = load_player_data()
     
-    # 指定されたカテゴリと合計EXPに加算
+    # 経験値を加算
     if category in data:
         data[category] += amount
-    data['exp'] += amount
-    
-    # レベルアップ判定（例：100EXPごとに1レベル上がる）
-    new_level = (data['exp'] // 100) + 1
-    if new_level > data['level']:
-        data['level'] = new_level
-        is_level_up = True
-    else:
-        is_level_up = False
-        
+    data['exp'] += amount #
+
+    # レベルアップ判定
+    is_eligible, diffs, next_lv = check_level_up(data)
+
     # ファイルに保存
     with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-        
-    return is_level_up, data['level']
+    
+    if is_eligible:
+        data['level'] = next_lv
+        save_player_data(data)
+        return True, next_lv # レベルアップ成功
+    else:
+        save_player_data(data)
+        return False, diffs # まだ上がらない（不足分を返す）
 
 def report_study(category, count):
     """
@@ -154,3 +173,38 @@ def report_study(category, count):
     is_up, new_lv = add_exp(category, total_earned)
     
     return is_up, new_lv, total_earned
+
+def check_level_up(data):
+    current_lv = data.get('level', 1)
+    next_lv = current_lv + 1
+    
+    # 1. 全体で必要な累計EXP（ベースライン）
+    required_total = ((next_lv - 1) ** 2) * 100
+    
+    # 2. 各カテゴリで必要な個別ノルマ（required_totalに対する比率）
+    base_for_norma = max(0, required_total - 100)
+    targets = {
+        'tech': base_for_norma * (45 / 60),
+        'mgmt': base_for_norma * (5 / 60),
+        'strat': base_for_norma * (10 / 60)
+    }
+    
+    diffs = {}
+    is_eligible = True
+    
+    # --- 判定1: 全体経験値のチェック ---
+    current_total_exp = data.get('exp', 0)
+    if current_total_exp < required_total:
+        is_eligible = False
+        diffs['total_exp'] = required_total - current_total_exp
+    
+    # --- 判定2: 個別カテゴリのチェック ---
+    for cat, target in targets.items():
+        current_val = data.get(cat, 0)
+        if current_val < target:
+            is_eligible = False
+            # すでに total_exp で落ちていても、何が足りないか可視化するために計算を続ける
+            diffs[cat] = math.ceil(target - current_val)
+            
+    # 全体かつ個別の全てを満たした場合のみ is_eligible は True のまま残る
+    return is_eligible, diffs, next_lv
