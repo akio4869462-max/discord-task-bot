@@ -76,7 +76,7 @@ def load_player_data():
     if os.path.exists(PLAYER_DATA_FILE):
         with open(PLAYER_DATA_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    # 初期データ
+    # 初期データx
     return {"level": 1, "exp": 0, "tech": 0, "mgmt": 0, "strat": 0, "bquest": 0}
 
 def save_player_data(data):
@@ -101,20 +101,41 @@ def get_status_summary():
     needed_in_level = exp_for_next_level - exp_for_current_level
     # バーが100%を超えないように制御
     progress_percent = min(1.0, exp_in_level / needed_in_level)
+
+    # 3. 称号とノルマ判定の取得
+    title = get_title(data)
+    is_eligible, diffs, _ = check_level_up(data)
+
+    if not is_eligible and progress_percent >= 1.0:
+        progress_percent = 0.99
     
     bar_length = 10
     filled_length = int(bar_length * progress_percent)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
-    
-    # 3. 称号とノルマ判定の取得
-    # title = get_title(data)
-    is_eligible, diffs, _ = check_level_up(data)
+
+
     
     # 4. メッセージの組み立て
     msg = f"🏆 **現在のランク: Lv.{level}**\n"
-    # msg += f"称号: **{title}**\n"
+    msg += f"称号: **{title}**\n"
     msg += f"進捗: `{bar}` {int(progress_percent * 100)}%\n\n"
     
+    # ボス戦の表示
+    current_idx = data.get('current_boss_idx', 0)
+    if current_idx < len(BOSS_LIST):
+        boss = BOSS_LIST[current_idx]
+        if data.get('total_solved', 0) >= boss['threshold']:
+            # ボス戦中
+            hp = data.get('boss_hp', boss['hp'])
+            max_hp = boss['hp']
+            hp_bar = '🟥' * int(10 * (hp/max_hp)) + '⬜' * (10 - int(10 * (hp/max_hp)))
+            msg += f"⚠️ **BOSS BATTLE: {boss['name']}**\n"
+            msg += f"HP: `{hp_bar}` {hp} / {max_hp}\n\n"
+        else:
+            # 次のボスまでのカウントダウン
+            next_target = boss['threshold'] - data.get('total_solved', 0)
+            msg += f"👾 次のボス出現まで: あと {next_target} 問\n\n"
+
     # 5. 不足分の表示（二段構え判定）
     if diffs:
         msg += "📝 **レベルアップへの不足分:**\n"
@@ -130,6 +151,7 @@ def get_status_summary():
         msg += "✨ **ノルマ達成！次のレベルへ昇格可能です**\n"
     
     msg += f"\n📊 **現在の詳細ステータス:**\n"
+    msg += f"📚 累計回答数: {data.get('total_solved', 0)} 問\n"
     msg += f" ・累計経験値: {current_exp} EXP\n"
     msg += f" ・テクノロジ: {data['tech']} pt\n"
     msg += f" ・マネジメント: {data['mgmt']} pt\n"
@@ -140,26 +162,48 @@ def get_status_summary():
 
 def add_exp(category, amount=10):
     data = load_player_data()
+    solved_count = int(amount / 10)
+    event_type = None
     
-    # 経験値を加算
+    # 1. 基礎データの更新
+    data['total_solved'] = data.get('total_solved', 0) + solved_count
     if category in data:
         data[category] += amount
-    data['exp'] += amount #
+    data['exp'] += amount
 
-    # レベルアップ判定
+    # 2. ボス戦ロジックの実行
+    # --- 1. ボス出現判定 ---
+    if not data.get("is_boss_active"):
+        data['solved_since_last_boss'] = data.get('solved_since_last_boss', 0) + solved_count
+        if data['solved_since_last_boss'] >= 100:
+            boss = check_boss_appearance(data)
+            if boss:
+                event_type = "BOSS_APPEAR" # 出現イベント
+    # --- 2. 攻撃・撃破判定 ---
+    else:
+        data["boss_hp"] -= solved_count
+        if data["boss_hp"] <= 0:
+            data["boss_hp"] = 0
+            data["is_boss_active"] = False
+            data["current_boss_idx"] = data.get("current_boss_idx", 0) + 1
+            data['exp'] += 200
+            event_type = "BOSS_DEFEATED" # 撃破イベント
+        else:
+            event_type = "BOSS_DAMAGE" # ダメージイベント
+
+    # 3. レベルアップ判定（現在のデータで判定）
     is_eligible, diffs, next_lv = check_level_up(data)
-
-    # ファイルに保存
-    with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-    
     if is_eligible:
         data['level'] = next_lv
-        save_player_data(data)
-        return True, next_lv # レベルアップ成功
+
+    # 4. 全ての更新が終わってから1回だけ保存する
+    save_player_data(data)
+
+    # 5. 結果を返却
+    if is_eligible:
+        return True, next_lv, event_type
     else:
-        save_player_data(data)
-        return False, diffs # まだ上がらない（不足分を返す）
+        return False, diffs, event_type
 
 def report_study(category, count):
     """
@@ -170,9 +214,9 @@ def report_study(category, count):
     total_earned = count * exp_per_question
     
     # 前に作った add_exp を使って加算
-    is_up, new_lv = add_exp(category, total_earned)
+    is_up, new_lv, event = add_exp(category, total_earned)
     
-    return is_up, new_lv, total_earned
+    return is_up, new_lv, total_earned, event
 
 def check_level_up(data):
     current_lv = data.get('level', 1)
@@ -208,3 +252,64 @@ def check_level_up(data):
             
     # 全体かつ個別の全てを満たした場合のみ is_eligible は True のまま残る
     return is_eligible, diffs, next_lv
+
+def get_title(data):
+    """
+    プレイヤーのステータスに基づいて称号を決定する
+    """
+    tech = data.get('tech', 0)
+    mgmt = data.get('mgmt', 0)
+    strat = data.get('strat', 0)
+    bquest = data.get('bquest', 0)
+    total_exp = data.get('exp', 0)
+    level = data.get('level', 1)
+
+    # 1. 最上位称号（全ての分野で高い実績）
+    if tech >= 3000 and mgmt >= 500 and strat >= 1000:
+        return "🏆 プロフェッショナル・エンジニア"
+    
+    # 2. 分野特化型称号
+    if tech >= 2000:
+        return "💻 テクノロジの求道者"
+    if mgmt >= 500:
+        return "📊 チームの守護神（PM）"
+    if strat >= 1000:
+        return "🏢 経営戦略の軍師"
+    if bquest >= 1000:
+        return "🧩 アルゴリズム・マスター"
+
+    # 3. レベル・累計経験値ベースの称号
+    if level >= 10:
+        return "⚔️ 熟練の学習者"
+    if level >= 5:
+        return "🛡️ 中級冒険者"
+    if total_exp >= 500:
+        return "🛡️ 初級冒険者"
+    
+    # 4. 初期称号
+    return "🐣 ITの卵"
+
+# ボスの定義はそのまま活用！
+BOSS_LIST = [
+    {"threshold": 100, "name": "ITパスポートの残影", "hp": 10},
+    {"threshold": 300, "name": "令和5年度 過去問の番人", "hp": 60},
+    {"threshold": 500, "name": "アルゴリズムの巨像", "hp": 100},
+    {"threshold": 1000, "name": "基本情報エンジニアの覇者", "hp": 300},
+]
+
+def check_boss_appearance(data):
+    """ボス出現判定ロジック"""
+    # 累計ではなく『前回のボス撃破からの加算分』で判定する
+    current_count = data.get('solved_since_last_boss', 0)
+    current_boss_idx = data.get('current_boss_idx', 0)
+    
+    if current_boss_idx < len(BOSS_LIST):
+        next_boss = BOSS_LIST[current_boss_idx]
+        # 「あと100問」など、各ボスごとの出現条件（threshold）を満たしたか
+        if current_count >= 100: # ここを固定値（100）にしても、リストのthresholdにしてもOK
+            if not data.get("is_boss_active"):
+                data["boss_hp"] = next_boss["hp"]
+                data["is_boss_active"] = True
+                data["solved_since_last_boss"] = 0 # ここでリセット！
+                return next_boss
+    return None

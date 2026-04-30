@@ -209,9 +209,24 @@ class StudyReportModal(discord.ui.Modal):
 
         count = int(self.count_input.value)
         # study_logicの関数を呼び出す（先ほど作った report_study を使用）
-        is_up, lv, earned = study_logic.report_study(self.cat_id, count)
+        is_up, lv, earned, event = study_logic.report_study(self.cat_id, count)
         
         msg = f"✅ {self.cat_name}の学習（{count}問分）を記録しました！\n+{earned} EXP 獲得！"
+
+        if event == "BOSS_APPEAR":
+            msg += f"\n🚨 **WARNING!! WARNING!!** 🚨\n"
+            msg += f"```diff\n- 過去問の深淵より、新たな強敵が出現しました！\n```"
+            msg += f"ステータスを確認して、撃破を目指してください！\n"
+
+        elif event == "BOSS_DAMAGE":
+            msg += f"\n⚔️ **BOSS ATTACK!**\n"
+            msg += f"あなたの学習がボスに **{count*10}** のダメージを与えた！\n"
+
+        elif event == "BOSS_DEFEATED":
+            msg += f"\n🎊 **VICTORY!!** 🎊\n"
+            msg += f"```fix\n極限の集中力により、過去問ボスを完全に撃破しました！\n```"
+            msg += f"撃破ボーナスとして **200 EXP** を獲得！次の戦いへ備えましょう。\n"
+
         if is_up:
             msg += f"\n🎊 レベルアップ！ Lv.{lv} になりました！"
         
