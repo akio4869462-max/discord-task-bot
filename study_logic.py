@@ -306,7 +306,7 @@ def check_boss_appearance(data):
     if current_boss_idx < len(BOSS_LIST):
         next_boss = BOSS_LIST[current_boss_idx]
         # 「あと100問」など、各ボスごとの出現条件（threshold）を満たしたか
-        if current_count >= 100: # ここを固定値（100）にしても、リストのthresholdにしてもOK
+        if data.get('total_solved', 0) >= next_boss["threshold"]:
             if not data.get("is_boss_active"):
                 data["boss_hp"] = next_boss["hp"]
                 data["is_boss_active"] = True
