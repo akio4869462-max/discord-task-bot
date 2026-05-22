@@ -17,49 +17,32 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 
 class StudyMenuView(View):
-    """
-    基本情報技術者試験・ITパスポートの学習メニューを表示・管理するViewクラス。
-    各ボタンに応じたクイズの出題やタイマー機能を提供します。
-    """
     def __init__(self):
         super().__init__(timeout=60)
 
-    @discord.ui.button(label="📝 学習を報告する", style=discord.ButtonStyle.primary)
+    # 毎日使うメインの報告ボタン（特等席）
+    @discord.ui.button(label="📝 学習を報告する", style=discord.ButtonStyle.primary, row=0)
     async def report_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """学習分野を選択するための専用メニュー（StudyReportView）を呼び出します。"""
         view = StudyReportView()
         await interaction.response.send_message("どの分野を学習しましたか？", view=view, ephemeral=True)
 
-    @discord.ui.button(label="用語検索", style=discord.ButtonStyle.primary)
-    async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """チャットコマンドによる用語検索の方法を案内します。"""
-        await interaction.response.send_message("`!s 用語` の形式でチャットに入力してください。", ephemeral=True)
-
-    @discord.ui.button(label="用語テスト", style=discord.ButtonStyle.success)
+    # テスト類は緑色に統一して同じ行に並べる
+    @discord.ui.button(label="用語テスト", style=discord.ButtonStyle.success, row=0)
     async def kiso_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """study_logic から基礎クイズを取得して出題します。"""
         await interaction.response.send_message(study_logic.get_kiso_quiz())
 
-    @discord.ui.button(label="計算テスト", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="計算テスト", style=discord.ButtonStyle.success, row=0)
     async def math_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """study_logic から計算クイズを取得して出題します。"""
         await interaction.response.send_message(study_logic.get_math_quiz())
 
-    @discord.ui.button(label="用語を追加", style=discord.ButtonStyle.primary, emoji="➕")
-    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """新用語を登録するための入力フォーム（Modal）を表示します。"""
-        await interaction.response.send_modal(KisoAddModal())
+    # 検索、追加などの補助機能は下の行（row=1）へ格納
+    @discord.ui.button(label="用語検索", style=discord.ButtonStyle.secondary, row=1)
+    async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("`!s 用語` の形式でチャットに入力してください。", ephemeral=True)
 
-    @discord.ui.button(label="25分タイマー開始", style=discord.ButtonStyle.secondary, emoji="⏱️")
-    async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """ポモドーロ・テクニック（25分集中）を模したタイマーを実行します。"""
-        await interaction.response.send_message("⏱️ 25分間の集中タイムを開始します！頑張りましょう。", ephemeral=True)
-        
-        # 25分間（1500秒）非同期で待機
-        await asyncio.sleep(1500)
-        
-        # 終了後にメンションで通知
-        await interaction.followup.send(f"{interaction.user.mention} 25分経過しました！5分間の休憩を取りましょう。☕")
+    @discord.ui.button(label="用語を追加", style=discord.ButtonStyle.secondary, emoji="➕", row=1)
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(KisoAddModal())
 
 class TaskMenuView(View):
     """
@@ -85,66 +68,89 @@ class TaskMenuView(View):
 
 class MainMenuView(View):
     """
-    ボットの核となる、各種機能（タスク・学習・バックアップ・ステータス）への
-    アクセスを提供するメインメニューViewクラス。
+    ボットの核となるメインメニュー。
+    タイマーを最上階層に昇格させ、作業全般のアクセシビリティを向上させています。
     """
     def __init__(self):
-        super().__init__(timeout=None)  # 永続的なViewとして設定
+        super().__init__(timeout=None)  # 永続的なView
+        
+        # ボス戦の状況をロードして勉強ボタンの演出を動的に切り替える
+        p_data = study_logic.load_player_data()
+        is_boss_active = p_data.get("is_boss_active", False)
+        
+        if is_boss_active:
+            self.study_menu.style = discord.ButtonStyle.danger
+            self.study_menu.label = "🚨 ボス襲来！基本情報の勉強"
+        else:
+            self.study_menu.style = discord.ButtonStyle.success
+            self.study_menu.label = "📖 基本情報の勉強"
 
-    @discord.ui.button(label="📋 タスク管理", style=discord.ButtonStyle.primary)
+    # --- 1行目（row=0）：毎日何度も触る「行動」のメインアクティビティ群 ---
+    @discord.ui.button(label="📋 タスク管理", style=discord.ButtonStyle.primary, row=0)
     async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """現在のタスク一覧を一覧表示し、タスク管理用のサブメニューを表示します。"""
         list_str = task_logic.list_tasks()
         view = TaskMenuView()
         await interaction.response.send_message(list_str, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📖 基本情報の勉強", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="📖 基本情報の勉強", style=discord.ButtonStyle.success, row=0)
     async def study_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """学習管理用のサブメニューを表示します。"""
         view = StudyMenuView()
         await interaction.response.send_message("勉強モード：機能を選んでください", view=view, ephemeral=True)
 
-    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary)
+    # 【大改善！】タイマーボタンを最上階層（1行目の右端）へ配置！
+    @discord.ui.button(label="集中タイマー", style=discord.ButtonStyle.secondary, emoji="⏱️", row=0)
+    async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """ポモドーロ・テクニック（25分集中）を模したタイマーを実行します。"""
+        await interaction.response.send_message("⏱️ 25分間の集中タイムを開始します！頑張りましょう。", ephemeral=True)
+        await asyncio.sleep(1500)
+        await interaction.followup.send(f"{interaction.user.mention} 25分経過しました！5分間の休憩を取りましょう。☕")
+
+
+    # --- 2行目（row=1）：自分の状態を確認したり、データを管理したりする機能群 ---
+    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
+    async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        status_msg = study_logic.get_status_summary()
+        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険の記録", color=0xffd700)
+        embed.description = status_msg
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=1)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """ローカルのJSONデータを discord.File として抽出し、ユーザーにバックアップとして提供します。"""
         files = ['todo.json', 'glossary.json']
-        found_files = []
-
-        for file_name in files:
-            if os.path.exists(file_name):
-                found_files.append(discord.File(file_name))
-
+        found_files = [discord.File(f) for f in files if os.path.exists(f)]
         if found_files:
             await interaction.response.send_message("現在のバックアップデータです。ダウンロードして保存してください：", files=found_files, ephemeral=True)
         else:
             await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
 
-    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger)
-    async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """ユーザーの現在のRPGステータス（LvやEXP、ボス状況）をEmbed形式で美しく表示します。"""
-        status_msg = study_logic.get_status_summary()
-        
-        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険の記録", color=0xffd700)
-        embed.description = status_msg
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 class TaskCompleteView(View):
     """
-    動的にボタンを生成し、タスクを番号順に完了（削除）するためのViewクラス。
+    動的にタスク名を取得し、完了ボタンを生成するView。
     """
     def __init__(self, count):
         super().__init__(timeout=60)
-        # 存在するタスクの数だけ動的にボタンを生成
+        
         for i in range(count):
-            button = Button(label=f"{i+1}", style=discord.ButtonStyle.danger)
+            # 【改善ポイント】インデックスから実際のタスク文字列を取得する
+            task_text = task_logic.get_task_text(i)
+            
+            # 文字数が長いとボタンからはみ出すので、10文字程度でトリミングする
+            if task_text and len(task_text) > 10:
+                display_label = f"{i+1}. {task_text[:10]}..."
+            elif task_text:
+                display_label = f"{i+1}. {task_text}"
+            else:
+                display_label = f"{i+1}"
+                
+            # スタイルを完了らしく「緑（success）」に、ラベルをタスク名に！
+            button = Button(label=display_label, style=discord.ButtonStyle.success)
             button.callback = self.create_callback(i)
             self.add_item(button)
 
     def create_callback(self, index):
-        """各ボタンが押された際に実行されるコールバック関数を動的に生成します。"""
         async def callback(interaction: discord.Interaction):
             result_msg = task_logic.complete_task(str(index + 1))
+            # 完了後はメッセージを更新して、ボタンを無効化するか消去するとさらに綺麗よ
             await interaction.response.send_message(result_msg, ephemeral=True)
         return callback
 
