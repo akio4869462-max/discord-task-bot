@@ -23,17 +23,8 @@ class StudyMenuView(View):
     # 毎日使うメインの報告ボタン（特等席）
     @discord.ui.button(label="📝 学習を報告する", style=discord.ButtonStyle.primary, row=0)
     async def report_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = StudyReportView()
+        view = WorkReportView()
         await interaction.response.send_message("どの分野を学習しましたか？", view=view, ephemeral=True)
-
-    # テスト類は緑色に統一して同じ行に並べる
-    @discord.ui.button(label="用語テスト", style=discord.ButtonStyle.success, row=0)
-    async def kiso_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(study_logic.get_kiso_quiz())
-
-    @discord.ui.button(label="計算テスト", style=discord.ButtonStyle.success, row=0)
-    async def math_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(study_logic.get_math_quiz())
 
     # 検索、追加などの補助機能は下の行（row=1）へ格納
     @discord.ui.button(label="用語検索", style=discord.ButtonStyle.secondary, row=1)
@@ -67,59 +58,66 @@ class TaskMenuView(View):
             await interaction.response.send_message("完了する番号を選んでください：", view=view, ephemeral=True)
 
 class MainMenuView(View):
-    """
-    ボットの核となるメインメニュー。
-    タイマーを最上階層に昇格させ、作業全般のアクセシビリティを向上させています。
-    """
     def __init__(self):
-        super().__init__(timeout=None)  # 永続的なView
-        
-        # ボス戦の状況をロードして勉強ボタンの演出を動的に切り替える
+        super().__init__(timeout=None)
         p_data = study_logic.load_player_data()
         is_boss_active = p_data.get("is_boss_active", False)
         
         if is_boss_active:
             self.study_menu.style = discord.ButtonStyle.danger
-            self.study_menu.label = "🚨 ボス襲来！基本情報の勉強"
+            self.study_menu.label = "🚨 ボス襲来！作業の記録"
         else:
             self.study_menu.style = discord.ButtonStyle.success
-            self.study_menu.label = "📖 基本情報の勉強"
+            self.study_menu.label = "📖 作業の記録"
 
-    # --- 1行目（row=0）：毎日何度も触る「行動」のメインアクティビティ群 ---
+    # --- 1行目（row=0） ---
     @discord.ui.button(label="📋 タスク管理", style=discord.ButtonStyle.primary, row=0)
     async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         list_str = task_logic.list_tasks()
         view = TaskMenuView()
         await interaction.response.send_message(list_str, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📖 基本情報の勉強", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="📖 作業の記録", style=discord.ButtonStyle.success, row=0)
     async def study_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = StudyMenuView()
-        await interaction.response.send_message("勉強モード：機能を選んでください", view=view, ephemeral=True)
+        view = WorkReportView()
+        await interaction.response.send_message("作業内容：カテゴリを選んでください", view=view, ephemeral=True)
 
-    # 【大改善！】タイマーボタンを最上階層（1行目の右端）へ配置！
     @discord.ui.button(label="集中タイマー", style=discord.ButtonStyle.secondary, emoji="⏱️", row=0)
     async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """ポモドーロ・テクニック（25分集中）を模したタイマーを実行します。"""
-        await interaction.response.send_message("⏱️ 25分間の集中タイムを開始します！頑張りましょう。", ephemeral=True)
+        await interaction.response.send_message("⏱️ 25分間の集中タイムを開始します！開発（programming）の経験値に連動します。", ephemeral=True)
         await asyncio.sleep(1500)
-        await interaction.followup.send(f"{interaction.user.mention} 25分経過しました！5分間の休憩を取りましょう。☕")
+        is_up, lv, earned, event = study_logic.report_study("programming", 25)
+        msg = f"{interaction.user.mention} 25分経過しました！お疲れ様でした。☕\n💻 開発作業25分を自動記録しました！（+{earned} EXP）"
+        if is_up: msg += f"\n🎊 レベルアップ！ Lv.{lv} になりました！"
+        await interaction.followup.send(msg)
 
-
-    # --- 2行目（row=1）：自分の状態を確認したり、データを管理したりする機能群 ---
+    # --- 2行目（row=1）：【大復活！】インプット用のメニューに進化 ---
     @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
     async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         status_msg = study_logic.get_status_summary()
-        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険の記録", color=0xffd700)
+        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険の記録 (就活攻略RPG)", color=0xffd700)
         embed.description = status_msg
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # 用語集・ニュース連携用のボタンを「row=1」の空きスペースにスマートに配置！
+    @discord.ui.button(label="🔍 用語検索", style=discord.ButtonStyle.secondary, row=1)
+    async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """ポップアップ（モーダル）を開いて、ストックした用語を検索します。"""
+        # 【大改善！】チャット案内を廃止して、直接検索モーダルを起動！
+        await interaction.response.send_modal(SearchWordModal())
+
+    @discord.ui.button(label="➕ 気になる用語をストック", style=discord.ButtonStyle.secondary, row=1)
+    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """学術書などで気になった単語を保存するモーダルを開きます。"""
+        await interaction.response.send_modal(KisoAddModal())
+
     @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=1)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        files = ['todo.json', 'glossary.json']
+        # glossary.json もバックアップ対象に復活させたわよ！
+        files = ['todo.json', 'player_data.json', 'glossary.json']
         found_files = [discord.File(f) for f in files if os.path.exists(f)]
         if found_files:
-            await interaction.response.send_message("現在のバックアップデータです。ダウンロードして保存してください：", files=found_files, ephemeral=True)
+            await interaction.response.send_message("現在のバックアップデータです：", files=found_files, ephemeral=True)
         else:
             await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
 
@@ -154,87 +152,108 @@ class TaskCompleteView(View):
             await interaction.response.send_message(result_msg, ephemeral=True)
         return callback
 
-class KisoAddModal(discord.ui.Modal, title='新しい用語の登録'):
+class KisoAddModal(discord.ui.Modal, title='気になる用語のストック'):
     """
-    新しい学習用語をボットに登録するための入力モーダルフォーム。
+    あとからニュース検索などに使い回せるよう、単語とメモを保存するモーダル。
     """
-    term = discord.ui.TextInput(label='用語名', placeholder='例: CPU', required=True)
+    term = discord.ui.TextInput(label='気になる用語・技術名', placeholder='例: エッジAI, クライアントサイドレンダリング', required=True)
     desc = discord.ui.TextInput(
-        label='用語の説明',
+        label='簡単なメモ（学術書のページ数や概要など）',
         style=discord.TextStyle.paragraph,
-        placeholder='例: コンピュータの制御や演算を行う中心的な装置。',
+        placeholder='例: 書籍〇ページ。今後ニュース機能と連携して自動収集するキーワード。',
         required=True,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        """送信された用語と説明を study_logic を介して登録します。"""
+        # study_logicの元の関数（add_kiso）をそのまま呼び出すわね
         result = study_logic.add_kiso(self.term.value, self.desc.value)
         await interaction.response.send_message(result, ephemeral=True)
 
-class StudyReportView(View):
+class SearchWordModal(discord.ui.Modal, title='ストック用語の検索'):
+    """
+    ポップアップでキーワード入力を受け付け、部分一致する用語を検索して返すモーダル。
+    """
+    keyword = discord.ui.TextInput(
+        label='検索したいキーワード', 
+        placeholder='例: エッジAI （一部の文字だけでもOK）', 
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """送信されたキーワードを元に study_logic で検索し、結果を ephemeral（自分だけに見えるメッセージ）で返します。"""
+        word = self.keyword.value
+        
+        # study_logicの既存の検索関数を呼び出すわよ！
+        result_msg = study_logic.search_glossary(word)
+        
+        # 検索結果をポップアップを送信した本人にだけこっそり表示
+        await interaction.response.send_message(result_msg, ephemeral=True)
+
+class WorkReportView(View):
     """
     学習した分野（テクノロジ、マネジメント、ストラテジ、B問題）を選択するViewクラス。
     """
     def __init__(self):
         super().__init__(timeout=60)
     
-    @discord.ui.button(label="テクノロジ", style=discord.ButtonStyle.secondary)
-    async def tech_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_report(interaction, "tech", "テクノロジ")
+    @discord.ui.button(label="💻 開発を報告", style=discord.ButtonStyle.success)
+    async def programming_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 勉強用モーダルを流用して「分単位」の入力モーダルを開く
+        await interaction.response.send_modal(WorkReportModal("programming", "開発・ポートフォリオ制作"))
 
-    @discord.ui.button(label="マネジメント", style=discord.ButtonStyle.secondary)
-    async def mgmt_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_report(interaction, "mgmt", "マネジメント")
+    @discord.ui.button(label="📝 書類・面接を報告", style=discord.ButtonStyle.success)
+    async def document_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WorkReportModal("document", "書類作成・面接対策"))
 
-    @discord.ui.button(label="ストラテジ", style=discord.ButtonStyle.secondary)
-    async def strat_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_report(interaction, "strat", "ストラテジ")
+    @discord.ui.button(label="📚 インプットを報告", style=discord.ButtonStyle.success)
+    async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WorkReportModal("reading", "技術書・ニュース学習"))
 
-    @discord.ui.button(label="B問題", style=discord.ButtonStyle.secondary)
-    async def bquest_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.process_report(interaction, "bquest", "B問題")
-
-    async def process_report(self, interaction, cat_id, cat_name):
-        """選択された分野に応じた問題数入力モーダルを表示します。"""
-        await interaction.response.send_modal(StudyReportModal(cat_id, cat_name))
-
-class StudyReportModal(discord.ui.Modal):
+class WorkReportModal(discord.ui.Modal):
     """
-    解いた問題数を入力させ、EXPの反映やボスバトルイベントの判定を処理するモーダル。
+    作業時間（分）を入力させ、EXPの反映やイベントの判定を処理するモーダル。
     """
     def __init__(self, cat_id, cat_name):
-        super().__init__(title=f'{cat_name}の学習報告')
+        # モーダルのタイトルを「〇〇の作業報告」に動的変更
+        super().__init__(title=f'{cat_name}の作業報告')
         self.cat_id = cat_id
         self.cat_name = cat_name
 
+    # 【改善ポイント】ラベルとプレースホルダーを「時間（分）」に変更！
     count_input = discord.ui.TextInput(
-        label='解いた問題数を入力してください',
-        placeholder='例: 10',
+        label='作業した時間（分）を入力してください',
+        placeholder='例: 25 （半角数字）',
         min_length=1,
         max_length=3,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        """入力値をバリデーションし、学習成果をRPGシステムに反映させます。"""
+        """入力された時間をバリデーションし、RPGシステムに反映させます。"""
+        # 数字かどうかのチェック
         if not self.count_input.value.isdigit():
-            await interaction.response.send_message("数字で入力してください！", ephemeral=True)
+            await interaction.response.send_message("数字（分）で入力してください！", ephemeral=True)
             return
 
-        count = int(self.count_input.value)
-        is_up, lv, earned, event = study_logic.report_study(self.cat_id, count)
+        # 入力された文字列を整数（分）に変換
+        minutes = int(self.count_input.value)
         
-        msg = f"✅ {self.cat_name}の学習（{count}問分）を記録しました！\n+{earned} EXP 獲得！"
+        # 【重要】裏側のロジック（study_logic）に、カテゴリIDと「分」を渡す！
+        # ※ロジック側の引数名がまだ count のままであっても、ここに minutes を渡せばOKよ
+        is_up, lv, earned, event = study_logic.report_study(self.cat_id, minutes)
+        
+        # 報告完了メッセージのテキストも「分」に合わせる
+        msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{earned} EXP 獲得！"
 
-        # ボスイベントに応じたゲーム演出のテキスト分岐
+        # ボスイベントに応じた演出（必要に応じて今後テキストを変えても楽しいわね！）
         if event == "BOSS_APPEAR":
-            msg += f"\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 過去問の深淵より、新たな強敵が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
+            msg += f"\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
         elif event == "BOSS_DAMAGE":
-            msg += f"\n⚔️ **BOSS ATTACK!**\nあなたの学習がボスに **{count*10}** のダメージを与えた！\n"
+            msg += f"\n⚔️ **TASK ATTACK!**\nあなたの集中した時間がボスに ダメージを与えた！\n"
         elif event == "BOSS_DEFEATED":
-            msg += f"\n🎊 **VICTORY!!** 🎊\n```fix\n極限の集中力により、過去問ボスを完全に撃破しました！\n```撃破ボーナスとして **200 EXP** を獲得！次の戦いへ備えましょう。\n"
+            msg += f"\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
 
         if is_up:
-            msg += f"\n🎊 レベルアップ！ Lv.{lv} になりました！"
+            msg += f"\n🎊 レベルアップ！ 各スキルの習得度が Lv.{lv} になりました！"
         
         await interaction.response.send_message(msg, ephemeral=True)
 
@@ -245,21 +264,16 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    """
-    メッセージが送信された際に呼ばれるイベント。
-    プレフィックス形式（!コマンド）のチャット入力をルーティングします。
-    """
     if message.author == client.user:
         return
 
     content = message.content
 
-    # メニュー表示コマンド（スマホ操作を考慮し、全角の「！」にも対応）
     if content == '!menu' or content == '！':
         view = MainMenuView()
         await message.channel.send("メニューを選んでください：", view=view)
 
-    # タスク管理コマンドの処理
+    # タスク管理コマンド
     if content.startswith('!add '):
         await message.channel.send(task_logic.add_task(content[5:]))
     elif content == '!list':
@@ -267,15 +281,8 @@ async def on_message(message):
     elif content.startswith('!done '):
         await message.channel.send(task_logic.complete_task(content[6:]))
 
-    # 学習システムコマンドの処理
-    elif content == '!kiso':
-        await message.channel.send(study_logic.get_kiso_quiz())
-    elif content == '!math':
-        await message.channel.send(study_logic.get_math_quiz())
-    elif content.startswith('!kiso_add '):
-        await message.channel.send(study_logic.add_kiso_word(content[10:]))
-    elif content.startswith('!search '):
-        word = content[8:]
+    elif content.startswith('!s '):
+        word = content[3:]
         await message.channel.send(study_logic.search_glossary(word))
 
 client.run(TOKEN)

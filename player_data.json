@@ -1,8 +1,12 @@
 {
     "level": 1,
     "exp": 0,
-    "tech": 0,
-    "mgmt": 0,
-    "strat": 0,
-    "bquest": 0
+    "total_minutes": 0,
+    "minutes_since_last_boss": 0,
+    "programming": 0,
+    "document": 0,
+    "reading": 0,
+    "current_boss_idx": 0,
+    "is_boss_active": false,
+    "boss_hp": 0
 }
