@@ -76,13 +76,20 @@ def add_kiso(term, desc):
     if not term or not desc:
         return "用語と説明を両方入力してください。"
 
-    glossary = []
+    # ⭕ 修正ポイント1：初期化をリスト `[]` から辞書 `{}` に変更
+    glossary = {}
     if os.path.exists('glossary.json'):
         with open('glossary.json', 'r', encoding='utf-8') as f:
             glossary = json.load(f)
 
-    # 辞書形式で新しいデータを末尾に追加
-    glossary.append({"term": term, "desc": desc})
+    # 💡 応用ポイント：すでに登録済みの単語なら上書き（または警告）できるようにチェック
+    if term in glossary:
+        # 上書きしたくない場合はここで return "既に登録されています。" にしてもOK
+        pass 
+
+    # ⭕ 修正ポイント2：append ではなく、辞書型への代入（キーと値）に変更
+    # term（例: "RAG"）をキーにして、desc（説明文）を保存します
+    glossary[term] = desc
 
     with open('glossary.json', 'w', encoding='utf-8') as f:
         json.dump(glossary, f, ensure_ascii=False, indent=4)
@@ -91,29 +98,28 @@ def add_kiso(term, desc):
 
 def search_glossary(word):
     """
-    登録されている用語集から、指定されたキーワードを部分一致・大文字小文字無視で検索する関数。
-    
-    Args:
-        word (str): 検索したいキーワード
-    Returns:
-        str: 検索結果一覧（該当がない場合は未検出の案内）
+    ユーザーが入力したキーワードで用語集（JSON）を部分一致検索する関数。
     """
+    if not word:
+        return "検索するキーワードを入力してください。"
+
     if not os.path.exists('glossary.json'):
-        return "用語データが見つかりません。"
-    
+        return "用語集がまだ作成されていません。"
+
     with open('glossary.json', 'r', encoding='utf-8') as f:
         glossary = json.load(f)
-    
-    # 内包表記を使い、大文字・小文字を区別せず部分一致する用語をリストアップ
-    results = [qa for qa in glossary if word.lower() in qa['term'].lower()]
-    
-    if not results:
-        return f"「{word}」に関する用語は見つかりませんでした。"
-    
-    response = f"🔍 「{word}」の検索結果 ({len(results)}件):\n"
-    for qa in results:
-        response += f"**【{qa['term']}】**\n{qa['desc']}\n"
-    return response
+
+    # ⭕ 修正ポイント：辞書型に対応した部分一致検索（大文字小文字を区別しない）
+    matched = []
+    for term, desc in glossary.items():
+        if word.lower() in term.lower():
+            matched.append(f"• **{term}**: {desc}")
+
+    if not matched:
+        return f"🔍 「{word}」に一致する用語は見つかりませんでした。"
+
+    # 見つかった結果を改行で繋げて返す
+    return "🔍 **検索結果:**\n" + "\n".join(matched)
 
 
 # ==========================================
