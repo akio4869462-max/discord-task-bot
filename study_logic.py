@@ -37,9 +37,13 @@ def get_kiso_quiz():
     if not glossary:
         return "用語が登録されていません。"
 
-    # random.choiceを使って要素を等確率で1つ選択
-    qa = random.choice(glossary)
-    return f"**【試験用語】**\n用語: **{qa['term']}**\n解説: ||{qa['desc']}||"
+    # ⭕ 修正ポイント：辞書型からランダムに1つ選ぶための処理に変更
+    # 一度キー（単語）のリストを作ってから、random.choice で1つ選びます
+    terms = list(glossary.keys())
+    chosen_term = random.choice(terms)
+    chosen_desc = glossary[chosen_term]
+    
+    return f"**【試験用語クイズ】**\n用語: **{chosen_term}**\n解説: ||{chosen_desc}||"
 
 def get_math_quiz():
     """
@@ -121,6 +125,31 @@ def search_glossary(word):
     # 見つかった結果を改行で繋げて返す
     return "🔍 **検索結果:**\n" + "\n".join(matched)
 
+def get_glossary_list():
+    """
+    登録されている用語の一覧を文字数制限を考慮して返す関数。
+    
+    Returns:
+        str: ストックされている用語の箇条書きメッセージ
+    """
+    if not os.path.exists('glossary.json'):
+        return "用語集がまだ作成されていません。"
+
+    with open('glossary.json', 'r', encoding='utf-8') as f:
+        glossary = json.load(f)
+
+    if not glossary:
+        return "現在、ストックされている用語はありません。"
+
+    # ⭕ 辞書のキー（単語名）だけを取得
+    terms = glossary.keys()
+    
+    # 箇条書きのテキストに整形
+    list_msg = "📚 **現在のストック用語一覧:**\n"
+    for term in terms:
+        list_msg += f"• {term}\n"
+        
+    return list_msg
 
 # ==========================================
 # 2. RPG・ステータス管理関連のロジック

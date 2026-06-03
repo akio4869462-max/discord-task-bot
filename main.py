@@ -108,7 +108,20 @@ class MainMenuView(View):
     async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(KisoAddModal())
 
-    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=1)
+    # ⭕ 追加ポイント1：用語一覧表示ボタン (ボタンが詰まってきたのでrow=2に綺麗に並べましょう！)
+    @discord.ui.button(label="📚 用語一覧", style=discord.ButtonStyle.secondary, row=2)
+    async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        list_msg = study_logic.get_glossary_list()
+        await interaction.response.send_message(list_msg, ephemeral=True)
+
+    # ⭕ 追加ポイント2：バグを直した用語クイズボタン (同じくrow=2へ配置！)
+    @discord.ui.button(label="🎲 用語クイズ", style=discord.ButtonStyle.secondary, row=2)
+    async def quiz_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        quiz_msg = study_logic.get_kiso_quiz()
+        await interaction.response.send_message(quiz_msg, ephemeral=True)
+
+    # --- 4行目（row=3）：既存のバックアップとニュースをまとめます ---
+    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=3)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         files = ['todo.json', 'player_data.json', 'glossary.json']
         found_files = [discord.File(f) for f in files if os.path.exists(f)]
@@ -117,17 +130,11 @@ class MainMenuView(View):
         else:
             await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
 
-    # --- 3行目（row=2）：ニュース収集機能 ---
-    @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=3)
     async def news_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         """NewsAPI（またはRSSフィード）を介して、最新のIT・技術トレンドニュースを表示"""
-        # API通信やパース処理によるタイムアウト（3秒制限）を防ぐため、事前に応答を保留（defer）
         await interaction.response.defer(ephemeral=True)
-        
-        # ニュースロジックからデータを取得
         news_msg = news_logic.get_it_news()
-        
-        # 結果をリクエストしたユーザー本人のみに通知
         await interaction.followup.send(news_msg, ephemeral=True)
 
 
