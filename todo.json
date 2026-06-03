@@ -1,4 +1,14 @@
 [
-    "基本情報の勉強",
-    "プログラミング学習"
+    {
+        "task": "BotのUI拡張",
+        "category": "programming",
+        "deadline": "2026-06-12",
+        "priority": 2
+    },
+    {
+        "task": "Botのバグ修正",
+        "category": "programming",
+        "deadline": "2026-06-12",
+        "priority": 2
+    }
 ]
