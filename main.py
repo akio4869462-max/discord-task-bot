@@ -85,13 +85,27 @@ class MainMenuView(View):
 
     @discord.ui.button(label="集中タイマー", style=discord.ButtonStyle.secondary, emoji="⏱️", row=0)
     async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 1. 最初にボタンが押されたことは、3秒以内に「本人のみ非表示」で即座に受け付ける
         await interaction.response.send_message("⏱️ 25分間の集中タイムを開始します！開発（programming）の経験値に連動します。", ephemeral=True)
+        
+        # 2. 25分後の投稿先として、このボタンが押された「チャンネル」を変数にキープしておく
+        channel = interaction.channel
+        user_mention = interaction.user.mention
+        user_id = interaction.user.id # 後のロジック用
+        
+        # 3. 25分（1500秒）待機
         await asyncio.sleep(1500)
+        
+        # 4. 25分経過後のデータ処理（ここは元のまま）
         is_up, lv, earned, event = study_logic.report_study("programming", 25)
-        msg = f"{interaction.user.mention} 25分経過しました！お疲れ様でした。☕\n💻 開発作業25分を自動記録しました！（+{earned} EXP）"
+        
+        # 5. ⭕ 修正ポイント：followup ではなく、チャンネルに直接普通のメッセージとして送信する！
+        msg = f"{user_mention} 25分経過しました！お疲れ様でした。☕\n💻 開発作業25分を自動記録しました！（+{earned} EXP）"
         if is_up:
             msg += f"\n🎊 レベルアップ！ Lv.{lv} になりました！"
-        await interaction.followup.send(msg)
+            
+        # interaction.followup.send ではなく channel.send を使うことでタイムアウトを回避！
+        await channel.send(msg)
 
     @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
     async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
