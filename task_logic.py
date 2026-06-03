@@ -1,113 +1,176 @@
+"""タスク管理データ永続化モジュール (期限拡張 ＆ 優先度スター対応版)
+
+JSONファイル（todo.json）を用いてユーザーのタスクデータを永続化します。
+タスクごとにカテゴリ、期限（デッドライン）、そして優先度（★）を保持し、
+優先度高 ＆ 期限順のマルチソート機能をサポートします。
+"""
+
 import json
 import os
+from datetime import datetime
 
-# タスクデータを永続化するためのJSONファイルのパス
+# ====================================================
+# ⚙️ システム定数・設定値
+# ====================================================
 DB_FILE = 'todo.json'
 
+CATEGORY_MAP = {
+    'programming': '💻 開発',
+    'document': '📝 書類・面接',
+    'reading': '📚 インプット'
+}
+
+# ⭕ 優先度を視覚化するためのスターマップ
+PRIORITY_MAP = {
+    3: '★★★',
+    2: '★★☆',
+    1: '★☆☆'
+}
+
+
 def load_data():
-    """
-    JSONファイルからタスクデータを読み込む関数。
-    ファイルが存在しない場合は、安全に空のリストを返します。
-    
-    Returns:
-        list: タスク文字列が格納されたリスト
-    """
+    """JSONファイルからタスクデータを読み込みます。"""
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(DB_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ [ERROR] タスクデータ（{DB_FILE}）の読み込みに失敗しました: {e}")
+            return []
     return []
 
-def save_data(data):
-    """
-    指定されたタスクデータをJSONファイルへ書き込み、保存する関数。
-    日本語が文字化けしないよう、ensure_ascii=False を指定しています。
-    
-    Args:
-        data (list): 保存するタスクデータのリスト
-    """
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
 
-def add_task(task_text):
-    """
-    新しいタスクをJSONデータに追加し、保存する関数。
-    
+def save_data(data):
+    """指定されたタスクデータをJSONファイルへ書き込み、保存します。"""
+    try:
+        with open(DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except IOError as e:
+        print(f"⚠️ [ERROR] タスクデータ（{DB_FILE}）の保存に失敗しました: {e}")
+
+
+def add_task(task_text, category='programming', deadline_str=None, priority=2):
+    """新しいタスクをカテゴリ情報・期限・優先度付きでデータに追加し、永続化します。
+
     Args:
-        task_text (str): ユーザーから入力されたタスクの内容
+        task_text (str): タスクの内容。
+        category (str): タスクのカテゴリ。
+        deadline_str (str): ユーザー入力の期限（例: "6/15", "2026-06-15"）。
+        priority (int): 優先度数値。3=高, 2=中, 1=低。デフォルトは 2。
+
     Returns:
-        str: 登録完了を通知するチャット用メッセージ
+        str: 登録完了メッセージ。
     """
+    if category not in CATEGORY_MAP:
+        category = 'programming'
+
+    # 優先度の値チェック（安全対策）
+    if priority not in [1, 2, 3]:
+        priority = 2
+
+    # 📅 期限文字列を「YYYY-MM-DD」形式にパース（整形）する
+    formatted_deadline = None
+    if deadline_str and deadline_str.strip():
+        try:
+            cleaned_str = deadline_str.strip().replace('/', '-')
+            if len(cleaned_str.split('-')) == 2:
+                current_year = datetime.now().year
+                cleaned_str = f"{current_year}-{cleaned_str}"
+            
+            dt = datetime.strptime(cleaned_str, "%Y-%m-%d")
+            formatted_deadline = dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
     todo_list = load_data()
-    todo_list.append(task_text)
+    
+    new_item = {
+        "task": task_text,
+        "category": category,
+        "deadline": formatted_deadline,
+        "priority": priority  # ⭕ 新しいフィールド
+    }
+    todo_list.append(new_item)
     save_data(todo_list)
-    return f'✅ 「{task_text}」を登録＆保存しました！'
+    
+    category_name = CATEGORY_MAP[category]
+    stars = PRIORITY_MAP[priority]
+    dl_msg = f"（期限: {formatted_deadline}）" if formatted_deadline else "（期限なし）"
+    return f'✅ 【{category_name}】に「{task_text}」を登録しました！ [優先度: {stars}] {dl_msg}'
+
 
 def list_tasks():
-    """
-    現在保存されているタスクを整形し、一覧として返す関数。
-    タスクが空の場合は、その旨を通知するメッセージを返します。
-    
-    Returns:
-        str: 番号付きのタスク一覧メッセージ、または未登録通知
-    """
+    """現在保存されているタスクを『優先度が高い順』、次いで『期限が近い順』にソートして一覧表示します。"""
     todo_list = load_data()
     if not todo_list:
         return '現在、登録されたタスクはありません。'
     
-    response = '【現在のタスク一覧】\n'
-    # enumerateを使って、1から始まる番号を自動付与してテキストを構築
-    for i, t in enumerate(todo_list, 1):
-        response += f'{i}. {t}\n'
+    # 互換性を持たせつつ辞書型に統一（古い形式のデータがあっても壊れないようにするわ！）
+    normalized_list = []
+    for item in todo_list:
+        if isinstance(item, str):
+            normalized_list.append({"task": item, "category": "programming", "deadline": None, "priority": 2})
+        else:
+            normalized_list.append({
+                "task": item.get('task', ''),
+                "category": item.get('category', 'programming'),
+                "deadline": item.get('deadline', None),
+                "priority": item.get('priority', 2)  # 過去のタスクはとりあえず「中(2)」にするわ
+            })
+
+    # ⭕ 2段階ソート：①優先度の降順(-x['priority']) -> ②期限の昇順
+    # 優先度3(高)が一番上に来て、同じ優先度の中では期限が近い順に並ぶようにするわよ！
+    normalized_list.sort(key=lambda x: (-x['priority'], x['deadline'] if x['deadline'] else '9999-12-31'))
+
+    # ソートされた状態で保存データを更新
+    save_data(normalized_list)
+    
+    response = '📋 **【現在のクエスト一覧（優先度＆期限順）】**\n'
+    for i, item in enumerate(normalized_list, 1):
+        task_text = item.get('task', '')
+        cat_key = item.get('category', 'programming')
+        category_text = CATEGORY_MAP.get(cat_key, '💻 開発')
+        dl = item.get('deadline', None)
+        priority = item.get('priority', 2)
+        
+        stars = PRIORITY_MAP.get(priority, '★★☆')
+        dl_text = f" ⏳ 期限: {dl}" if dl else " 🗓️ 期限なし"
+        
+        # ちょっと豪華に、最優先(3)には「🔥」マークをつけて目立たせちゃう！
+        p_emoji = "🔥 " if priority == 3 else ""
+        
+        response += f'{i}. {p_emoji}[{stars}] 【{category_text}】 {task_text}{dl_text}\n'
+        
     return response
 
+
 def complete_task(number_str):
-    """
-    ユーザーが指定した番号のタスクをリストから削除（完了）し、データを更新する関数。
-    不正な入力値や範囲外の番号に対して、例外処理（try-except）によるガードを行っています。
-    
-    Args:
-        number_str (str): 完了したいタスクの番号（ユーザー入力の文字列）
-    Returns:
-        str: 処理結果（成功メッセージ、またはエラーメッセージ）
-    """
+    """ユーザーが指定した番号のタスクをリストから削除（完了処理）します。"""
     try:
         todo_list = load_data()
-        # ユーザー目線の「1番」をプログラム用の「インデックス0」に補正
         index = int(number_str) - 1
         
-        # 指定されたインデックスがリストの範囲内にあるかチェック
         if 0 <= index < len(todo_list):
             removed = todo_list.pop(index)
             save_data(todo_list)
-            return f'消去＆保存完了: 「{removed}」をお疲れ様でした！'
+            
+            if isinstance(removed, str):
+                task_text = removed
+                category = 'programming'
+            else:
+                task_text = removed.get('task', '')
+                category = removed.get('category', 'programming')
+                
+            msg = f'消去＆保存完了: 「{task_text}」をお疲れ様でした！'
+            return msg, category
         else:
-            return 'その番号のタスクは見つかりません。'
+            return 'その番号のタスクは見つかりません。', None
+            
     except ValueError:
-        # 数字以外の文字が渡された場合のエラーハンドリング
-        return '番号を正しく入力してください（例: !done 1）'
+        return '番号を正しく入力してください。', None
+
 
 def get_task_count():
-    """
-    現在のタスクの総数を返す関数。
-    Discord UI（View）側で、動的にいくつ完了ボタンを生成するかを決定するために使用されます。
-    
-    Returns:
-        int: タスクの総数
-    """
+    """現在のタスクの総数を取得します。"""
     todo_list = load_data()
     return len(todo_list)
-
-def get_task_text(index):
-    """
-    指定されたインデックス（要素番号）のタスク内容を取得する関数。
-    範囲外のインデックスが指定された場合は None を返します。
-    
-    Args:
-        index (int): 取得したいタスクのインデックス
-    Returns:
-        str/None: タスクの内容文字列、または存在しない場合は None
-    """
-    todo_list = load_data()
-    if 0 <= index < len(todo_list):
-        return todo_list[index]
-    return None

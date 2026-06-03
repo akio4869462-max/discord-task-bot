@@ -1,61 +1,80 @@
-import os
-import json
-import random
-import math
+"""就活攻略RPGゲームロジックモジュール
 
-# プレイヤーのゲームデータを永続化するためのJSONファイル名
+ユーザーの作業時間（ライフログ）を経験値（EXP）に換算し、レベルアップ、
+スキル称号の動的決定、および累積時間に応じた課題ボスバトル等のゲーム要素を制御します。
+試験用語クイズや基数変換クイズなどの学習支援ロジックも統合しています。
+"""
+
+import json
+import math
+import os
+import random
+
+# ====================================================
+# ⚙️ システム定数・設定値
+# ====================================================
 PLAYER_DATA_FILE = 'player_data.json'
+GLOSSARY_FILE = 'glossary.json'
+
+# ゲームバランス調整用定数
+EXP_PER_MINUTE = 10         # 1分間の作業で獲得できる基礎経験値
+BOSS_DEFEAT_BONUS = 200    # ボス撃破時に獲得できるボーナス経験値
+EXP_BASE_UNIT = 100         # レベルアップ必要経験値の算出基準値
 
 # 【ボスバトルの定義】
 # 累積の「作業時間（分）」に応じて出現する課題ボスのリスト
 BOSS_LIST = [
-    {"threshold": 120, "name": "職務経歴書の壁", "hp": 30},       # 累計2時間作業で出現
-    {"threshold": 300, "name": "魔のコーディングテスト", "hp": 60}, # 累計5時間
-    {"threshold": 600, "name": "圧迫面接の幻影", "hp": 120},       # 累計10時間
-    {"threshold": 1200, "name": "内定を阻む最終関門", "hp": 300},  # 累計20時間
+    {"threshold": 120, "name": "職務経歴書の壁", "hp": 30},        # 累計2時間作業で出現
+    {"threshold": 300, "name": "魔のコーディングテスト", "hp": 60},  # 累計5時間作業で出現
+    {"threshold": 600, "name": "圧迫面接の幻影", "hp": 120},       # 累計10時間作業で出現
+    {"threshold": 1200, "name": "内定を阻む最終関門", "hp": 300},   # 累計20時間作業で出現
 ]
 
 
-# ==========================================
+# ====================================================
 # 1. クイズ・用語集関連のロジック
-# ==========================================
+# ====================================================
 
 def get_kiso_quiz():
-    """
-    JSONファイルからランダムに試験用語を1つ抽出し、クイズ形式で返す関数。
-    解答（解説）部分はDiscordのネタバレ防止仕様（||で囲む）にして出力します。
-    
+    """登録されている試験用語集からランダムに1問を抽出し、クイズ形式で取得します。
+
+    解答（解説）部分は、Discord 内でのネタバレ防止（スポイラー表示）に対応するため、
+    「||」で囲った文字列として出力されます。
+
     Returns:
-        str: 用語と、隠された解説文のメッセージ
+        str: クイズ文、またはデータ未登録の旨を伝えるシステムメッセージ。
     """
-    if not os.path.exists('glossary.json'):
+    if not os.path.exists(GLOSSARY_FILE):
         return "用語データが見つかりません。"
     
-    with open('glossary.json', 'r', encoding='utf-8') as f:
-        glossary = json.load(f)
+    try:
+        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+            glossary = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
+        return "用語データの読み込み中にエラーが発生しました。"
     
     if not glossary:
         return "用語が登録されていません。"
 
-    # ⭕ 修正ポイント：辞書型からランダムに1つ選ぶための処理に変更
-    # 一度キー（単語）のリストを作ってから、random.choice で1つ選びます
+    # 辞書型構造からランダムに要素を1つ選択
     terms = list(glossary.keys())
     chosen_term = random.choice(terms)
     chosen_desc = glossary[chosen_term]
     
     return f"**【試験用語クイズ】**\n用語: **{chosen_term}**\n解説: ||{chosen_desc}||"
 
+
 def get_math_quiz():
-    """
-    基本情報・ITパスポートで必須となる「基数変換（2進数、10進数、16進数）」のクイズを動的に生成する関数。
-    問題タイプ（4モード）をランダムに決定し、format関数を用いて自動変換して出題します。
-    
+    """基本情報・ITパスポート試験で頻出の「基数変換」に関する計算クイズを動的に生成します。
+
+    1〜255の範囲（8ビット表現領域）から数値をランダム抽出し、4つの出題モード
+    （10進数→2進数、2進数→10進数、2進数→16進数、16進数→2進数）を自動構築します。
+
     Returns:
-        str: 計算問題と、隠された正解のメッセージ
+        str: 動的に生成された計算問題と、隠蔽された正解メッセージ。
     """
-    # 1〜255の間でランダムな数値を1つ生成（8ビットで表現できる範囲）
     target_num = random.randint(1, 255)
-    # 出題モードをランダムに決定（0:10→2, 1:2→10, 2:2→16, 3:16→2)
     mode = random.randint(0, 3)
     
     if mode == 0:
@@ -67,156 +86,190 @@ def get_math_quiz():
     else:
         return f"16進数「{format(target_num, '02X')}」を 2進数(8bit) に直すと？\n答え: || {format(target_num, '08b')} ||"
 
+
 def add_kiso(term, desc):
-    """
-    モーダルフォームから送られてきた新しい用語名と説明文を用語集（JSON）に追記・保存する関数。
-    
+    """新規のIT用語とその解説文を、用語集ファイル（glossary.json）に登録・永続化します。
+
     Args:
-        term (str): 登録する用語名
-        desc (str): 用語の解説文
+        term (str): 登録対象の用語名。
+        desc (str): 用語の解説・メモ内容。
+
     Returns:
-        str: 登録結果のメッセージ
+        str: 登録処理結果を通知するチャット用メッセージ。
     """
     if not term or not desc:
         return "用語と説明を両方入力してください。"
 
-    # ⭕ 修正ポイント1：初期化をリスト `[]` から辞書 `{}` に変更
     glossary = {}
-    if os.path.exists('glossary.json'):
-        with open('glossary.json', 'r', encoding='utf-8') as f:
-            glossary = json.load(f)
+    if os.path.exists(GLOSSARY_FILE):
+        try:
+            with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+                glossary = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
 
-    # 💡 応用ポイント：すでに登録済みの単語なら上書き（または警告）できるようにチェック
-    if term in glossary:
-        # 上書きしたくない場合はここで return "既に登録されています。" にしてもOK
-        pass 
-
-    # ⭕ 修正ポイント2：append ではなく、辞書型への代入（キーと値）に変更
-    # term（例: "RAG"）をキーにして、desc（説明文）を保存します
+    # 用語をキー、解説文を値として辞書に代入（既存の用語は上書き更新）
     glossary[term] = desc
 
-    with open('glossary.json', 'w', encoding='utf-8') as f:
-        json.dump(glossary, f, ensure_ascii=False, indent=4)
+    try:
+        with open(GLOSSARY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(glossary, f, ensure_ascii=False, indent=4)
+        return f"✅ 用語「{term}」を登録しました！"
+    except IOError as e:
+        print(f"⚠️ [ERROR] 用語集の保存に失敗しました: {e}")
+        return "❌ 用語の保存処理中にエラーが発生しました。"
 
-    return f"✅ 用語「{term}」を登録しました！"
 
 def search_glossary(word):
-    """
-    ユーザーが入力したキーワードで用語集（JSON）を部分一致検索する関数。
+    """ユーザー指定のキーワードに基づき、用語集ファイルから部分一致による検索を実行します。
+
+    Args:
+        word (str): 検索用キーワード。
+
+    Returns:
+        str: 該当した用語の一覧メッセージ、またはヒットなしの通知メッセージ。
     """
     if not word:
         return "検索するキーワードを入力してください。"
 
-    if not os.path.exists('glossary.json'):
+    if not os.path.exists(GLOSSARY_FILE):
         return "用語集がまだ作成されていません。"
 
-    with open('glossary.json', 'r', encoding='utf-8') as f:
-        glossary = json.load(f)
+    try:
+        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+            glossary = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
+        return "データファイルの読み込みに失敗しました。"
 
-    # ⭕ 修正ポイント：辞書型に対応した部分一致検索（大文字小文字を区別しない）
     matched = []
     for term, desc in glossary.items():
+        # 大文字小文字を区別せずに部分一致検索
         if word.lower() in term.lower():
             matched.append(f"• **{term}**: {desc}")
 
     if not matched:
         return f"🔍 「{word}」に一致する用語は見つかりませんでした。"
 
-    # 見つかった結果を改行で繋げて返す
     return "🔍 **検索結果:**\n" + "\n".join(matched)
 
+
 def get_glossary_list():
-    """
-    登録されている用語の一覧を文字数制限を考慮して返す関数。
-    
+    """現在蓄積されているすべてのストック用語のキー（用語名）一覧を取得します。
+
     Returns:
-        str: ストックされている用語の箇条書きメッセージ
+        str: 箇条書き形式で整形された登録用語一覧のメッセージ。
     """
-    if not os.path.exists('glossary.json'):
+    if not os.path.exists(GLOSSARY_FILE):
         return "用語集がまだ作成されていません。"
 
-    with open('glossary.json', 'r', encoding='utf-8') as f:
-        glossary = json.load(f)
+    try:
+        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
+            glossary = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
+        return "データファイルの読み込みに失敗しました。"
 
     if not glossary:
         return "現在、ストックされている用語はありません。"
 
-    # ⭕ 辞書のキー（単語名）だけを取得
-    terms = glossary.keys()
-    
-    # 箇条書きのテキストに整形
     list_msg = "📚 **現在のストック用語一覧:**\n"
-    for term in terms:
+    for term in glossary.keys():
         list_msg += f"• {term}\n"
         
     return list_msg
 
-# ==========================================
+
+# ====================================================
 # 2. RPG・ステータス管理関連のロジック
-# ==========================================
+# ====================================================
 
 def load_player_data():
+    """プレイヤーのゲームステータスデータをファイルから読み込みます。
+
+    ファイルが存在しない場合は、標準の初期ステータス構造体を生成して返します。
+
+    Returns:
+        dict: プレイヤーの各ステータス値を格納した辞書。
+    """
     if os.path.exists(PLAYER_DATA_FILE):
-        with open(PLAYER_DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    # 【変更！】汎用作業ライフログ用の初期構造
+        try:
+            with open(PLAYER_DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️ [ERROR] プレイヤーデータの読み込みに失敗しました: {e}")
+            
     return {
         "level": 1, 
         "exp": 0, 
-        "total_minutes": 0,       # 累計の作業時間（分）
-        "programming": 0,         # 開発の累計作業時間（分）
-        "document": 0,            # 書類の累計作業時間（分）
-        "reading": 0              # インプットの累計作業時間（分）
+        "total_minutes": 0,       # 総合累積作業時間（分）
+        "programming": 0,         # 開発の累積作業時間（分）
+        "document": 0,            # 書類作成の累積作業時間（分）
+        "reading": 0,             # インプットの累積作業時間（分）
+        "is_boss_active": False,
+        "current_boss_idx": 0,
+        "boss_hp": 0,
+        "minutes_since_last_boss": 0
     }
 
+
 def save_player_data(data):
-    """
-    引数で受け取ったプレイヤーのステータスデータをJSONファイルへ上書き保存する関数。
-    
+    """プレイヤーのゲームステータスデータをファイルへ上書き保存します。
+
     Args:
-        data (dict): 更新されたプレイヤーデータの辞書
+        data (dict): 更新されたプレイヤーデータの辞書。
     """
-    with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except IOError as e:
+        print(f"⚠️ [ERROR] プレイヤーデータの保存に失敗しました: {e}")
+
 
 def add_exp(category, minutes=25):
-    """
-    指定されたカテゴリと作業時間（分）をプレイヤーデータに加算し、
-    ボス戦の発生、ダメージ計算、撃破判定、レベルアップ判定を統合して実行する関数。
+    """作業実績（分数）を基に各種ステータスを更新し、レベルアップやボス戦の各種判定を一元的に実行します。
+
+    Args:
+        category (str): 作業を行った該当カテゴリ（'programming', 'document', 'reading'）。
+        minutes (int): 実績時間（分）。デフォルトは25分。
+
+    Returns:
+        tuple: (
+            is_eligible (bool): レベルアップが発生したか否か,
+            result_data (int/dict): 新レベル（昇格時）または不足経験値データ辞書（非昇格時）,
+            event_type (str/None): 発生したボス戦イベントタイプ（'BOSS_APPEAR', 'BOSS_DAMAGE', 'BOSS_DEFEATED' など）
+        )
     """
     data = load_player_data()
+    earned_exp = minutes * EXP_PER_MINUTE
     
-    # 1分につき10 EXP獲得とする
-    earned_exp = minutes * 10
-    
-    # 1. 基礎データの更新
+    # 1. 基礎ステータス値の更新
     data['total_minutes'] = data.get('total_minutes', 0) + minutes
     if category in data:
-        data[category] += minutes # カテゴリごとの累積時間を増やす
-    data['exp'] += earned_exp      # 全体経験値を増やす
+        data[category] += minutes
+    data['exp'] = data.get('exp', 0) + earned_exp
 
     event_type = None
     
-    # 2. ボス戦ロジック（問題数をそのまま「累積時間（分）」に置き換えるわ！）
+    # 2. ボスバトルエンカウント・交戦ロジック
     if not data.get("is_boss_active"):
         data['minutes_since_last_boss'] = data.get('minutes_since_last_boss', 0) + minutes
-        # 例: 100分作業するたび、または特定の累積時間（threshold）でボス出現
         boss = check_boss_appearance(data)
         if boss:
             event_type = "BOSS_APPEAR"
     else:
-        # ボスへのダメージ（1分集中するごとにボスHPを1減算）
+        # ボス交戦中：1分間の作業につきボスへ 1 ダメージ
         data["boss_hp"] -= minutes  
         if data["boss_hp"] <= 0:
             data["boss_hp"] = 0
             data["is_boss_active"] = False
             data["current_boss_idx"] = data.get("current_boss_idx", 0) + 1
-            data['exp'] += 200  # 撃破ボーナスEXP
+            data['exp'] = data.get('exp', 0) + BOSS_DEFEAT_BONUS  # 撃破ボーナス付与
             event_type = "BOSS_DEFEATED"
         else:
             event_type = "BOSS_DAMAGE"
 
-    # 3. レベルアップ判定
+    # 3. レベルアップの自動判定
     is_eligible, diffs, next_lv = check_level_up(data)
     if is_eligible:
         data['level'] = next_lv
@@ -228,26 +281,42 @@ def add_exp(category, minutes=25):
     else:
         return False, diffs, event_type
 
+
 def report_study(category, minutes):
+    """UI（Modal / 集中タイマー）からの時間実績報告を受け付けるインターフェースラッパー。
+
+    Args:
+        category (str): 報告された作業カテゴリ。
+        minutes (int): 報告された作業時間（分）。
+
+    Returns:
+        tuple: (レベルアップ有無, 新レベル/必要データ, 計算された獲得EXP, 発生イベント名)
     """
-    UI（Modalやタイマー）から送られた「作業時間（分）」を反映するためのラッパー。
-    """
-    # 直接分数を渡して、add_exp側で1分=10EXPの計算を行う
     is_up, new_lv, event = add_exp(category, minutes)
-    
-    total_earned = minutes * 10  # メッセージ表示用に獲得EXPを計算
+    total_earned = minutes * EXP_PER_MINUTE
     return is_up, new_lv, total_earned, event
 
+
 def check_level_up(data):
-    """
-    【プランA】全体経験値のみでシンプルにレベルアップを判定する関数。
-    個別カテゴリのノルマ縛りを無くし、純粋な努力の積み重ねで昇格します。
+    """累積獲得経験値を基に、次レベルへの昇格条件を満たしているかを判定します。
+
+    必要累計経験値は、2次関数ロジック（(レベル-1)^2 * 100）に基づいて算出されます。
+
+    Args:
+        data (dict): プレイヤーのステータスデータ。
+
+    Returns:
+        tuple: (
+            is_eligible (bool): 昇格要件を満たしているか否か,
+            diffs (dict): 不足している経験値情報を格納した辞書,
+            next_lv (int): 条件を満たした場合の移行先レベル番号
+        )
     """
     current_lv = data.get('level', 1)
     next_lv = current_lv + 1
     
-    # 全体で必要な累計経験値の計算（美しい2次関数ロジックを継承！）
-    required_total = ((next_lv - 1) ** 2) * 100
+    # 次のレベル到達に必要な累計経験値の計算
+    required_total = ((next_lv - 1) ** 2) * EXP_BASE_UNIT
     
     diffs = {}
     is_eligible = True
@@ -261,56 +330,53 @@ def check_level_up(data):
 
 
 def get_status_summary():
-    """
-    新しい3つのスキル（開発・書類・インプット）の累積時間と、
-    全体経験値のプログレスバー、現在のボス状況を美しく整形して返す関数。
+    """現在の全スキル累積時間、経験値進捗、および交戦中のボスHP状況を視覚的に整形して取得します。
+
+    Returns:
+        str: Discord埋め込み表示用に完全に整形されたステータスサマリー。
     """
     data = load_player_data()
     current_exp = data.get('exp', 0)
     level = data.get('level', 1)
     next_level = level + 1
     
-    # 必要経験値の計算
-    exp_for_current_level = ((level - 1) ** 2) * 100
-    exp_for_next_level = ((next_level - 1) ** 2) * 100
+    # レベル内の経験値進捗算出
+    exp_for_current_level = ((level - 1) ** 2) * EXP_BASE_UNIT
+    exp_for_next_level = ((next_level - 1) ** 2) * EXP_BASE_UNIT
     
-    # 現在のレベル内での進捗率・テキスト進捗バーの計算
     exp_in_level = max(0, current_exp - exp_for_current_level)
     needed_in_level = exp_for_next_level - exp_for_current_level
     progress_percent = min(1.0, exp_in_level / needed_in_level) if needed_in_level > 0 else 1.0
     
+    # 進捗バー（視覚表現）の生成
     bar_length = 10
     filled_length = int(bar_length * progress_percent)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
-    # タイトル（称号）の取得
     title = get_title(data)
 
-    # 3. メッセージの組み立て開始
     msg = f"🏆 **総合プレイヤーランク: Lv.{level}**\n"
     msg += f"称号: **{title}**\n"
     msg += f"次のレベルまで: `{bar}` {int(progress_percent * 100)}%\n\n"
     
-    # 4. ボスバトルの状況（問題数から「累積作業時間」の判定に変更）
+    # ボスバトルエンカウント状況の取得
     current_idx = data.get('current_boss_idx', 0)
     if current_idx < len(BOSS_LIST):
         boss = BOSS_LIST[current_idx]
         if data.get('total_minutes', 0) >= boss['threshold']:
-            # ボス戦アクティブ状態
             hp = data.get('boss_hp', boss['hp'])
             max_hp = boss['hp']
-            # 安全なHPバー計算（0除算防止）
+            
             hp_ratio = max(0.0, min(1.0, hp / max_hp)) if max_hp > 0 else 0
             hp_bar = '🟥' * int(10 * hp_ratio) + '⬜' * (10 - int(10 * hp_ratio))
             msg += f"⚠️ **BOSS BATTLE: {boss['name']}**\n"
             msg += f"HP: `{hp_bar}` {hp} / {max_hp}\n\n"
         else:
-            # 次のボス出現までの残り時間（分）
             next_target = boss['threshold'] - data.get('total_minutes', 0)
             msg += f"👾 次の強敵（課題）出現まで: あと {next_target} 分の集中\n\n"
 
-    # 【変更箇所】5. 詳細数値の追加（時間をすべてヘルパー関数で変換！）
-    msg += f"📊 **現在の詳細ステータス:**\n"
+    # 詳細ステータステキストの組み立て
+    msg += "📊 **現在の詳細ステータス:**\n"
     msg += f"⏳ 総合集中時間: {format_minutes_to_hours(data.get('total_minutes', 0))}\n"
     msg += f"✨ 総合獲得経験値: {current_exp} EXP\n\n"
     msg += f"💻 開発（Programming）: {format_minutes_to_hours(data.get('programming', 0))}\n"
@@ -321,20 +387,24 @@ def get_status_summary():
 
 
 def get_title(data):
-    """
-    新しい3カテゴリの作業時間や総合レベルに応じて、
-    就活・開発状況にぴったりな格好いい称号を動的に決定します。
+    """各カテゴリの累積作業時間およびプレイヤーレベルに基づき、現在の称号を動的に判定します。
+
+    Args:
+        data (dict): プレイヤーのステータスデータ。
+
+    Returns:
+        str: 決定された称号名。
     """
     prog = data.get('programming', 0)
     doc = data.get('document', 0)
     read = data.get('reading', 0)
     level = data.get('level', 1)
 
-    # 1. 最上位称号（バランスよく極めたマスター）
+    # バランス特化最上位称号
     if prog >= 500 and doc >= 200 and read >= 200:
         return "🏆 フルスタック・就活マスター"
     
-    # 2. 各分野特化型の称号判定（分単位の基準ね）
+    # 各専門特化型称号
     if prog >= 300:
         return "💻 凄腕インフラ/開発エンジニア"
     if doc >= 150:
@@ -342,7 +412,7 @@ def get_title(data):
     if read >= 150:
         return "📚 技術トレンドの御意見番"
 
-    # 3. 到達レベルベースの称号判定
+    # レベル依存ベース称号
     if level >= 10:
         return "⚔️ 歴戦の努力家"
     if level >= 5:
@@ -350,33 +420,41 @@ def get_title(data):
     
     return "🐣 覚醒を待つギーク"
 
+
 def check_boss_appearance(data):
-    """
-    現在の累計回答数がボスの出現閾値に達しているかをチェックし、出現させるかを判定する関数。
-    
+    """現在の累積作業時間（分）が次なるボスの出現閾値（threshold）を超えているかを判定します。
+
+    条件を満たしている場合、対象ボスのHP情報をプレイヤーデータ内にアクティブ化します。
+
     Args:
-        data (dict): プレイヤーのステータスデータ
+        data (dict): プレイヤーのステータスデータ。
+
     Returns:
-        dict/None: 出現したボスのデータ（出現しない場合はNone）
+        dict/None: 出現したボスのデータオブジェクト。出現要件を満たさない場合は None。
     """
     current_boss_idx = data.get('current_boss_idx', 0)
     
-    # まだ倒していないボスがリストに残っているかチェック
     if current_boss_idx < len(BOSS_LIST):
         next_boss = BOSS_LIST[current_boss_idx]
-        # 累計回答数が、現在のボスの出現条件（threshold）を満たしたか判定
-        if data.get('total_solved', 0) >= next_boss["threshold"]:
+        
+        # ⭕ 旧仕様の total_solved（回答数）を、最新の時間仕様である total_minutes に完全統合
+        if data.get('total_minutes', 0) >= next_boss["threshold"]:
             if not data.get("is_boss_active"):
-                # ボス戦情報をアクティブにセット
                 data["boss_hp"] = next_boss["hp"]
                 data["is_boss_active"] = True
-                data["solved_since_last_boss"] = 0  # 周期判定用の回答数をリセット
+                data["minutes_since_last_boss"] = 0  # 周期判定用の累積カウントを初期化
                 return next_boss
     return None
 
+
 def format_minutes_to_hours(total_minutes):
-    """
-    分単位の数値を「〇時間〇分」または「〇分」の読みやすい形式に変換するヘルパー関数
+    """分単位の整数値を、可読性の高い「〇時間〇分」または「〇分」の表記文字列に変換します。
+
+    Args:
+        total_minutes (int): 変換対象の分数。
+
+    Returns:
+        str: 整形済みの時間表現文字列。
     """
     if total_minutes < 60:
         return f"{total_minutes}分"
