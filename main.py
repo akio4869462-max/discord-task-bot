@@ -111,7 +111,7 @@ def process_task_completion(category):
     elif event == "BOSS_DAMAGE":
         msg += "\n⚔️ **TASK ATTACK!**\n集中した努力がボスに ダメージを与えた！\n"
     elif event == "BOSS_DEFEATED":
-        msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見面に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
+        msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
 
     if is_up:
         p_data = study_logic.load_player_data()
@@ -313,7 +313,7 @@ class MainMenuView(View):
 
     @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=3)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        files = ['todo.json', 'player_data.json', 'glossary.json']
+        files = [os.path.join('data', f) for f in ('todo.json', 'player_data.json', 'glossary.json')]
         found_files = [discord.File(f) for f in files if os.path.exists(f)]
         if found_files:
             await interaction.response.send_message("現在のバックアップデータです：", files=found_files, ephemeral=True)

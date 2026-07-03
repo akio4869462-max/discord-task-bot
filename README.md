@@ -66,7 +66,7 @@ pip install -r requirements.txt
 コード スニペット
 
 
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
+DISCORD_TOKEN=your_discord_bot_token_here
 4. ボットの起動
 Bash
 

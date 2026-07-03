@@ -13,8 +13,8 @@ import random
 # ====================================================
 # ⚙️ システム定数・設定値
 # ====================================================
-PLAYER_DATA_FILE = 'player_data.json'
-GLOSSARY_FILE = 'glossary.json'
+PLAYER_DATA_FILE = os.path.join('data', 'player_data.json')
+GLOSSARY_FILE = os.path.join('data', 'glossary.json')
 
 # ゲームバランス調整用定数
 EXP_PER_MINUTE = 10         # 1分間の作業で獲得できる基礎経験値
@@ -112,6 +112,7 @@ def add_kiso(term, desc):
     glossary[term] = desc
 
     try:
+        os.makedirs(os.path.dirname(GLOSSARY_FILE), exist_ok=True)
         with open(GLOSSARY_FILE, 'w', encoding='utf-8') as f:
             json.dump(glossary, f, ensure_ascii=False, indent=4)
         return f"✅ 用語「{term}」を登録しました！"
@@ -220,6 +221,7 @@ def save_player_data(data):
         data (dict): 更新されたプレイヤーデータの辞書。
     """
     try:
+        os.makedirs(os.path.dirname(PLAYER_DATA_FILE), exist_ok=True)
         with open(PLAYER_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except IOError as e:

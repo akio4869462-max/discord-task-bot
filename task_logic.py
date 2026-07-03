@@ -12,7 +12,7 @@ from datetime import datetime
 # ====================================================
 # ⚙️ システム定数・設定値
 # ====================================================
-DB_FILE = 'todo.json'
+DB_FILE = os.path.join('data', 'todo.json')
 
 CATEGORY_MAP = {
     'programming': '💻 開発',
@@ -43,6 +43,7 @@ def load_data():
 def save_data(data):
     """指定されたタスクデータをJSONファイルへ書き込み、保存します。"""
     try:
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except IOError as e:

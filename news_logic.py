@@ -13,7 +13,7 @@ import urllib.request
 # ⚙️ システム定数・設定値
 # ====================================================
 RSS_URL = "https://rss.itmedia.co.jp/rss/2.0/itmedia_all.xml"
-GLOSSARY_FILE = "glossary.json"
+GLOSSARY_FILE = os.path.join('data', 'glossary.json')
 MAX_DISPLAY_ARTICLES = 5  # Discordに表示する最大記事数
 
 
