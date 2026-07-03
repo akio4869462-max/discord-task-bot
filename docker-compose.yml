@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    container_name: discord-task-bot
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      NEWS_CHANNEL_ID: ${NEWS_CHANNEL_ID}
+      TASK_CHANNEL_ID: ${TASK_CHANNEL_ID}
+    volumes:
+      - ./player_data.json:/app/player_data.json
+      - ./todo.json:/app/todo.json
+      - ./glossary.json:/app/glossary.json
