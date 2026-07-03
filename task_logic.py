@@ -7,6 +7,7 @@ JSONファイル（todo.json）を用いてユーザーのタスクデータを�
 
 import json
 import os
+import uuid
 from datetime import datetime
 
 # ====================================================
@@ -86,6 +87,7 @@ def add_task(task_text, category='programming', deadline_str=None, priority=2):
     todo_list = load_data()
     
     new_item = {
+        "id": uuid.uuid4().hex[:8],  # ⭕ プルダウン選択の対象を一意に特定するためのID
         "task": task_text,
         "category": category,
         "deadline": formatted_deadline,
@@ -110,9 +112,10 @@ def list_tasks():
     normalized_list = []
     for item in todo_list:
         if isinstance(item, str):
-            normalized_list.append({"task": item, "category": "programming", "deadline": None, "priority": 2})
+            normalized_list.append({"id": uuid.uuid4().hex[:8], "task": item, "category": "programming", "deadline": None, "priority": 2})
         else:
             normalized_list.append({
+                "id": item.get('id') or uuid.uuid4().hex[:8],  # 過去のタスクにはここでIDを補完するわ
                 "task": item.get('task', ''),
                 "category": item.get('category', 'programming'),
                 "deadline": item.get('deadline', None),
@@ -145,30 +148,44 @@ def list_tasks():
     return response
 
 
-def complete_task(number_str):
-    """ユーザーが指定した番号のタスクをリストから削除（完了処理）します。"""
-    try:
-        todo_list = load_data()
-        index = int(number_str) - 1
-        
-        if 0 <= index < len(todo_list):
-            removed = todo_list.pop(index)
-            save_data(todo_list)
-            
-            if isinstance(removed, str):
-                task_text = removed
-                category = 'programming'
-            else:
-                task_text = removed.get('task', '')
-                category = removed.get('category', 'programming')
-                
-            msg = f'消去＆保存完了: 「{task_text}」をお疲れ様でした！'
-            return msg, category
-        else:
-            return 'その番号のタスクは見つかりません。', None
-            
-    except ValueError:
-        return '番号を正しく入力してください。', None
+def _finish_complete(removed):
+    """完了（削除）したタスクの情報から通知メッセージとカテゴリを組み立てます。"""
+    if isinstance(removed, str):
+        task_text = removed
+        category = 'programming'
+    else:
+        task_text = removed.get('task', '')
+        category = removed.get('category', 'programming')
+
+    msg = f'消去＆保存完了: 「{task_text}」をお疲れ様でした！'
+    return msg, category
+
+
+def complete_task(identifier):
+    """タスクを完了（削除）します。
+
+    プルダウン選択時は一意なタスクID（英数字）、テキストコマンド（!done N）時は
+    表示上の番号（1始まり）を受け取ります。IDでの完全一致を優先することで、
+    一覧表示後にタスクが増減・並び替えされても、選んだつもりと別のタスクを
+    誤って完了させてしまう事故を防ぎます。
+    """
+    todo_list = load_data()
+
+    if not identifier.isdigit():
+        for i, item in enumerate(todo_list):
+            if isinstance(item, dict) and item.get('id') == identifier:
+                removed = todo_list.pop(i)
+                save_data(todo_list)
+                return _finish_complete(removed)
+        return 'そのタスクは既に完了しているか、見つかりませんでした。', None
+
+    index = int(identifier) - 1
+    if 0 <= index < len(todo_list):
+        removed = todo_list.pop(index)
+        save_data(todo_list)
+        return _finish_complete(removed)
+    else:
+        return 'その番号のタスクは見つかりません。', None
 
 
 def get_task_count():

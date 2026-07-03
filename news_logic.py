@@ -51,7 +51,7 @@ def get_it_news(keyword=None):
             RSS_URL, 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         )
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             xml_data = response.read()
 
         # 3. XMLデータのパース（解析）

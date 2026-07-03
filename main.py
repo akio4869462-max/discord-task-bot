@@ -50,7 +50,7 @@ async def xml_news_delivery_task():
         print("⏰ [朝の定期処理] ニュース取得 ＆ タスクリマインダーを実行中...")
         
         if news_channel is not None:
-            news_msg = news_logic.get_it_news()
+            news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
         else:
             print(f"⚠️ [定期配信] ニュースチャンネルが見つかりませんでした。")
@@ -89,7 +89,7 @@ async def xml_news_delivery_task():
     elif now_jst.hour == 20:
         if news_channel is not None:
             print("⏰ [夜の定期配信] ニュースを取得中...")
-            news_msg = news_logic.get_it_news()
+            news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
 
 
@@ -200,14 +200,15 @@ class TaskSelectView(View):
     """登録中タスクから動的にプルダウンメニューを生成して完了処理を行うView"""
     def __init__(self):
         super().__init__(timeout=60)
+        task_logic.list_tasks()  # 表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存する
         todo_list = task_logic.load_data()
-        
+
         options = []
         for i, item in enumerate(todo_list):
             # 表示上限が25個までなので安全対策
             if i >= 25:
                 break
-                
+
             if isinstance(item, str):
                 task_text = item
                 stars = "★★☆"
@@ -215,18 +216,19 @@ class TaskSelectView(View):
                 task_text = item.get('task', '')
                 p_val = item.get('priority', 2)
                 stars = task_logic.PRIORITY_MAP.get(p_val, '★★☆')
-            
+
             # プルダウンの選択肢ラベル（100文字以内のトリミング）
             label_text = f"{i+1}. [{stars}] {task_text}"
             if len(label_text) > 90:
                 label_text = label_text[:90] + "..."
-                
+
             options.append(discord.SelectOption(
                 label=label_text,
                 description=f"このタスクを完了状態（クエストクリア）にします",
-                value=str(i + 1)  # 1番から始まるインデックス文字列を渡す
+                # ⭕ 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
+                value=item.get('id') if isinstance(item, dict) else str(i + 1)
             ))
-            
+
         # セレクトメニューコンポーネントを定義してViewに追加
         if options:
             self.add_item(TaskDropdown(options))
@@ -237,11 +239,11 @@ class TaskDropdown(Select):
         super().__init__(placeholder='パーフェクトにこなしたタスクを選択...', min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # ユーザーが選択したvalue（番号文字列）を取得
-        selected_number = self.values[0]
-        result_msg, category = task_logic.complete_task(selected_number)
+        # ユーザーが選択したvalue（タスクID）を取得
+        selected_value = self.values[0]
+        result_msg, category = task_logic.complete_task(selected_value)
         rpg_msg = process_task_completion(category)
-        
+
         # 完了メッセージを返却
         await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
 
@@ -323,7 +325,7 @@ class MainMenuView(View):
     @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=3)
     async def news_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        news_msg = news_logic.get_it_news()
+        news_msg = await asyncio.to_thread(news_logic.get_it_news)
         await interaction.followup.send(news_msg, ephemeral=True)
 
 
@@ -339,6 +341,7 @@ class TaskSelectCombinedView(View):
         self.add_item(button)
         
         # 2. 次に、現在のタスク一覧からプルダウンの選択肢を作成して配置
+        task_logic.list_tasks()  # 表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存する
         todo_list = task_logic.load_data()
         options = []
         for i, item in enumerate(todo_list):
@@ -350,15 +353,16 @@ class TaskSelectCombinedView(View):
                 task_text = item.get('task', '')
                 p_val = item.get('priority', 2)
                 stars = task_logic.PRIORITY_MAP.get(p_val, '★★☆')
-                
+
             label_text = f"{i+1}. [{stars}] {task_text}"
             if len(label_text) > 90: label_text = label_text[:90] + "..."
-            
+
             options.append(discord.SelectOption(
                 label=label_text,
-                value=str(i + 1)
+                # ⭕ 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
+                value=item.get('id') if isinstance(item, dict) else str(i + 1)
             ))
-            
+
         if options:
             # row=1 にプルダウンを配置
             self.add_item(TaskDropdownCombined(options))
@@ -372,8 +376,8 @@ class TaskDropdownCombined(Select):
         super().__init__(placeholder='完了したタスクを選んでプルダウンを閉じる...', min_values=1, max_values=1, options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
-        selected_number = self.values[0]
-        result_msg, category = task_logic.complete_task(selected_number)
+        selected_value = self.values[0]
+        result_msg, category = task_logic.complete_task(selected_value)
         rpg_msg = process_task_completion(category)
         await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
 
@@ -515,7 +519,7 @@ async def on_message(message):
         news_channel = client.get_channel(NEWS_CHANNEL_ID)
         task_channel = client.get_channel(TASK_CHANNEL_ID)
         
-        news_msg = news_logic.get_it_news()
+        news_msg = await asyncio.to_thread(news_logic.get_it_news)
         if news_channel:
             await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
             
