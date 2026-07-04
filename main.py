@@ -337,10 +337,10 @@ class FocusTimerView(View):
             await interaction.response.send_message("既に終了しているか、キャンセルできるタイマーがありません。", ephemeral=True)
 
 
-class MainMenuView(View):
-    """ボットのコア機能を網羅したメインメニューを制御するViewクラス"""
+class StudyStatusMenuView(View):
+    """「作業・ステータス」サブメニュー：作業記録・集中タイマー・ステータス確認をまとめたView"""
     def __init__(self):
-        super().__init__(timeout=None)
+        super().__init__(timeout=60)
         p_data = study_logic.load_player_data()
         is_boss_active = p_data.get("is_boss_active", False)
         if is_boss_active:
@@ -349,13 +349,6 @@ class MainMenuView(View):
         else:
             self.study_menu.style = discord.ButtonStyle.success
             self.study_menu.label = "📖 作業の記録"
-
-    @discord.ui.button(label="📋 タスク管理メニュー", style=discord.ButtonStyle.primary, row=0)
-    async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        list_str = task_logic.list_tasks()
-        # ⭕ タスクメニューを開いた際、一緒に完了プルダウンも表示する最強の合わせ技Viewに変更！
-        view = TaskSelectCombinedView()
-        await interaction.response.send_message(list_str, view=view, ephemeral=True)
 
     @discord.ui.button(label="📖 作業の記録", style=discord.ButtonStyle.success, row=0)
     async def study_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -384,32 +377,44 @@ class MainMenuView(View):
         task = asyncio.create_task(run_focus_timer(interaction.channel, user_id, interaction.user.mention))
         active_focus_timers[user_id] = task
 
-    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=0)
     async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         status_msg = study_logic.get_status_summary()
         embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険 of 就活攻略RPG", color=0xffd700)
         embed.description = status_msg
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="🔍 用語検索", style=discord.ButtonStyle.secondary, row=1)
+
+class GlossaryMenuView(View):
+    """「学習・用語」サブメニュー：用語検索・ストック・一覧・クイズをまとめたView"""
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="🔍 用語検索", style=discord.ButtonStyle.secondary, row=0)
     async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(SearchWordModal())
 
-    @discord.ui.button(label="➕ 用語ストック", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="➕ 用語ストック", style=discord.ButtonStyle.secondary, row=0)
     async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(KisoAddModal())
 
-    @discord.ui.button(label="📚 用語一覧", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="📚 用語一覧", style=discord.ButtonStyle.secondary, row=0)
     async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         list_msg = study_logic.get_glossary_list()
         await interaction.response.send_message(list_msg, ephemeral=True)
 
-    @discord.ui.button(label="🎲 用語クイズ", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="🎲 用語クイズ", style=discord.ButtonStyle.secondary, row=0)
     async def quiz_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         quiz_msg = study_logic.get_kiso_quiz()
         await interaction.response.send_message(quiz_msg, ephemeral=True)
 
-    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=3)
+
+class UtilityMenuView(View):
+    """「その他」サブメニュー：データ出力・ニュース確認をまとめたView"""
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=0)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         files = [os.path.join('data', f) for f in ('todo.json', 'player_data.json', 'glossary.json')]
         found_files = [discord.File(f) for f in files if os.path.exists(f)]
@@ -418,11 +423,44 @@ class MainMenuView(View):
         else:
             await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
 
-    @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=0)
     async def news_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         news_msg = await asyncio.to_thread(news_logic.get_it_news)
         await interaction.followup.send(news_msg, ephemeral=True)
+
+
+class MainMenuView(View):
+    """ボットのコア機能を4つのカテゴリに整理したメインメニューを制御するViewクラス"""
+    def __init__(self):
+        super().__init__(timeout=None)
+        p_data = study_logic.load_player_data()
+        is_boss_active = p_data.get("is_boss_active", False)
+        if is_boss_active:
+            self.study_status_menu.style = discord.ButtonStyle.danger
+            self.study_status_menu.label = "🚨 ボス襲来！作業・ステータス"
+        else:
+            self.study_status_menu.style = discord.ButtonStyle.success
+            self.study_status_menu.label = "📖 作業・ステータス"
+
+    @discord.ui.button(label="📋 タスク管理メニュー", style=discord.ButtonStyle.primary, row=0)
+    async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        list_str = task_logic.list_tasks()
+        # ⭕ タスクメニューを開いた際、一緒に完了プルダウンも表示する最強の合わせ技Viewに変更！
+        view = TaskSelectCombinedView()
+        await interaction.response.send_message(list_str, view=view, ephemeral=True)
+
+    @discord.ui.button(label="📖 作業・ステータス", style=discord.ButtonStyle.success, row=0)
+    async def study_status_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=StudyStatusMenuView(), ephemeral=True)
+
+    @discord.ui.button(label="📚 学習・用語", style=discord.ButtonStyle.secondary, row=0)
+    async def glossary_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=GlossaryMenuView(), ephemeral=True)
+
+    @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=0)
+    async def utility_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=UtilityMenuView(), ephemeral=True)
 
 
 # ⭕ 新設：「タスク管理画面」用の、ボタン＋プルダウンが合体したView
