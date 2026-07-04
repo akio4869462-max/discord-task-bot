@@ -96,29 +96,53 @@ async def xml_news_delivery_task():
 # ====================================================
 # 🗃️ 共通ヘルパー関数
 # ====================================================
-def process_task_completion(category):
-    """タスク完了時のカテゴリに応じたEXP加算とゲーム内イベント文言の生成処理"""
-    if not category:
-        return ""
-        
-    is_up, _, event = study_logic.add_exp(category, TASK_COMPLETE_MINUTES)
-    cat_name = task_logic.CATEGORY_MAP.get(category, "開発")
-    earned_exp = TASK_COMPLETE_MINUTES * 10
-    msg = f"\n✨ タスク完了ボーナス獲得！ 【{cat_name}】+ {earned_exp} EXP"
+def build_event_message(is_up, level, event):
+    """レベルアップ・ボスバトルイベントの文言を組み立てます。
+
+    ボスへの通常ダメージ（BOSS_DAMAGE）は毎回起きる細かい進捗なので公開告知の対象外とし、
+    レベルアップ・ボス出現・ボス撃破という「節目」だけを公開告知の対象にします。
+
+    Returns:
+        tuple: (detail_msg: 本人向けの詳細文言, public_msg: 公開告知文言 または None)
+    """
+    detail_msg = ""
+    announcements = []
 
     if event == "BOSS_APPEAR":
-        msg += "\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
+        detail_msg += "\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
+        announcements.append("🚨 新たな課題（ボス）が出現しました！")
     elif event == "BOSS_DAMAGE":
-        msg += "\n⚔️ **TASK ATTACK!**\n集中した努力がボスに ダメージを与えた！\n"
+        detail_msg += "\n⚔️ **TASK ATTACK!**\n集中した努力がボスに ダメージを与えた！\n"
     elif event == "BOSS_DEFEATED":
-        msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
+        detail_msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
+        announcements.append("🎊 課題ボスを撃破しました！")
 
     if is_up:
-        p_data = study_logic.load_player_data()
-        current_lv = p_data.get("level", 1)
-        msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{current_lv} になりました！"
-        
-    return msg
+        detail_msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{level} になりました！"
+        announcements.append(f"🎊 レベルアップ！ Lv.{level} になりました！")
+
+    public_msg = "\n".join(announcements) if announcements else None
+    return detail_msg, public_msg
+
+
+def process_task_completion(category):
+    """タスク完了時のカテゴリに応じたEXP加算とゲーム内イベント文言の生成処理
+
+    Returns:
+        tuple: (detail_msg: 本人向けの詳細文言, public_msg: 公開告知文言 または None)
+    """
+    if not category:
+        return "", None
+
+    is_up, level_or_diff, event = study_logic.add_exp(category, TASK_COMPLETE_MINUTES)
+    cat_name = task_logic.CATEGORY_MAP.get(category, "開発")
+    earned_exp = TASK_COMPLETE_MINUTES * study_logic.EXP_PER_MINUTE
+    detail_msg = f"\n✨ タスク完了ボーナス獲得！ 【{cat_name}】+ {earned_exp} EXP"
+
+    event_detail, public_msg = build_event_message(is_up, level_or_diff if is_up else None, event)
+    detail_msg += event_detail
+
+    return detail_msg, public_msg
 
 
 # ====================================================
@@ -259,10 +283,13 @@ class TaskDropdown(Select):
         # ユーザーが選択したvalue（タスクID）を取得
         selected_value = self.values[0]
         result_msg, category = task_logic.complete_task(selected_value)
-        rpg_msg = process_task_completion(category)
+        rpg_msg, public_msg = process_task_completion(category)
 
-        # 完了メッセージを返却
+        # 完了メッセージを返却（詳細は本人にのみ表示）
         await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
+        # レベルアップ・ボス出現/撃破など節目のイベントはチャンネルにも告知する
+        if public_msg:
+            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 class MainMenuView(View):
@@ -300,9 +327,11 @@ class MainMenuView(View):
         
         is_up, lv, earned, event = study_logic.report_study("programming", int(FOCUS_TIMER_SECONDS / 60))
         msg = f"{user_mention} {int(FOCUS_TIMER_SECONDS / 60)}分経過しました！お疲れ様でした。☕\n💻 開発作業{int(FOCUS_TIMER_SECONDS / 60)}分を自動記録しました！（+{earned} EXP）"
-        if is_up:
-            msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{lv} になりました！"
-            
+
+        # ⭕ 元々レベルアップしか表示されておらず、ボス出現/撃破イベントが抜けていたので他の箇所と統一
+        event_detail, _ = build_event_message(is_up, lv if is_up else None, event)
+        msg += event_detail
+
         await channel.send(msg)
 
     @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
@@ -395,8 +424,10 @@ class TaskDropdownCombined(Select):
     async def callback(self, interaction: discord.Interaction):
         selected_value = self.values[0]
         result_msg, category = task_logic.complete_task(selected_value)
-        rpg_msg = process_task_completion(category)
+        rpg_msg, public_msg = process_task_completion(category)
         await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
+        if public_msg:
+            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 class KisoAddModal(discord.ui.Modal, title='気になる用語のストック'):
@@ -450,17 +481,13 @@ class WorkReportModal(discord.ui.Modal):
         is_up, lv, earned, event = study_logic.report_study(self.cat_id, minutes)
         msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{earned} EXP 獲得！"
 
-        if event == "BOSS_APPEAR":
-            msg += "\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
-        elif event == "BOSS_DAMAGE":
-            msg += "\n⚔️ **TASK ATTACK!**\nあなたの集中した時間がボスに ダメージを与えた！\n"
-        elif event == "BOSS_DEFEATED":
-            msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
+        event_detail, public_msg = build_event_message(is_up, lv if is_up else None, event)
+        msg += event_detail
 
-        if is_up:
-            msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{lv} になりました！"
-        
         await interaction.response.send_message(msg, ephemeral=True)
+        # レベルアップ・ボス出現/撃破など節目のイベントはチャンネルにも告知する
+        if public_msg:
+            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 # ====================================================
@@ -523,7 +550,7 @@ async def on_message(message):
         
     elif content.startswith('!done '):
         result_msg, category = task_logic.complete_task(content[6:].strip())
-        rpg_msg = process_task_completion(category)
+        rpg_msg, _ = process_task_completion(category)  # このコマンドは元々チャンネルに公開されるので告知メッセージは不要
         await message.channel.send(f"{result_msg}{rpg_msg}")
         
     elif content.startswith('!s '):
