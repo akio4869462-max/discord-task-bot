@@ -31,6 +31,9 @@ FOCUS_TIMER_SECONDS = 1500
 # タスク完了時に獲得できる疑似作業時間（15分 = 150 EXP）
 TASK_COMPLETE_MINUTES = 15
 
+# ⭕ 集中タイマーの多重起動防止用：user_id -> 実行中のasyncio.Taskを保持
+active_focus_timers = {}
+
 
 # ====================================================
 # ⏰ 定期自動配信・リマインダータスク（バックグラウンド処理）
@@ -123,6 +126,30 @@ def build_event_message(is_up, level, event):
 
     public_msg = "\n".join(announcements) if announcements else None
     return detail_msg, public_msg
+
+
+async def run_focus_timer(channel, user_id, user_mention):
+    """集中タイマー本体。指定秒数の経過を待ち、開発カテゴリのEXPとして自動記録します。
+
+    途中でキャンセルされた場合（asyncio.CancelledError）はEXPを記録せず、
+    静かに終了します。
+    """
+    try:
+        await asyncio.sleep(FOCUS_TIMER_SECONDS)
+    except asyncio.CancelledError:
+        return
+    finally:
+        # 完了・キャンセルいずれの場合も、多重起動防止の管理対象から外す
+        active_focus_timers.pop(user_id, None)
+
+    minutes = int(FOCUS_TIMER_SECONDS / 60)
+    is_up, lv, earned, event = study_logic.report_study("programming", minutes)
+    msg = f"{user_mention} {minutes}分経過しました！お疲れ様でした。☕\n💻 開発作業{minutes}分を自動記録しました！（+{earned} EXP）"
+
+    event_detail, _ = build_event_message(is_up, lv if is_up else None, event)
+    msg += event_detail
+
+    await channel.send(msg)
 
 
 def process_task_completion(category):
@@ -292,6 +319,24 @@ class TaskDropdown(Select):
             await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
+class FocusTimerView(View):
+    """集中タイマー実行中に表示する、キャンセルボタン付きView"""
+    def __init__(self, user_id):
+        super().__init__(timeout=FOCUS_TIMER_SECONDS + 10)
+        self.user_id = user_id
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.danger, emoji="🛑")
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        task = active_focus_timers.get(self.user_id)
+        if task and not task.done():
+            task.cancel()
+            active_focus_timers.pop(self.user_id, None)
+            self.stop()
+            await interaction.response.edit_message(content="⏹️ 集中タイマーをキャンセルしました。", view=None)
+        else:
+            await interaction.response.send_message("既に終了しているか、キャンセルできるタイマーがありません。", ephemeral=True)
+
+
 class MainMenuView(View):
     """ボットのコア機能を網羅したメインメニューを制御するViewクラス"""
     def __init__(self):
@@ -319,20 +364,25 @@ class MainMenuView(View):
 
     @discord.ui.button(label="集中タイマー", style=discord.ButtonStyle.secondary, emoji="⏱️", row=0)
     async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"⏱️ {int(FOCUS_TIMER_SECONDS / 60)}分間の集中タイムを開始します！開発（programming）の経験値に連動します。", ephemeral=True)
-        
-        channel = interaction.channel
-        user_mention = interaction.user.mention
-        await asyncio.sleep(FOCUS_TIMER_SECONDS)
-        
-        is_up, lv, earned, event = study_logic.report_study("programming", int(FOCUS_TIMER_SECONDS / 60))
-        msg = f"{user_mention} {int(FOCUS_TIMER_SECONDS / 60)}分経過しました！お疲れ様でした。☕\n💻 開発作業{int(FOCUS_TIMER_SECONDS / 60)}分を自動記録しました！（+{earned} EXP）"
+        user_id = interaction.user.id
+        existing_task = active_focus_timers.get(user_id)
+        if existing_task and not existing_task.done():
+            await interaction.response.send_message("既に集中タイマーが進行中です。先に完了かキャンセルをしてください。", ephemeral=True)
+            return
 
-        # ⭕ 元々レベルアップしか表示されておらず、ボス出現/撃破イベントが抜けていたので他の箇所と統一
-        event_detail, _ = build_event_message(is_up, lv if is_up else None, event)
-        msg += event_detail
+        # ⭕ Discordのタイムスタンプ書式(<t:...:R>)を使うと、Bot側で何もしなくても
+        # クライアント側で「あと24分」のように自動でリアルタイム更新される
+        end_ts = int((discord.utils.utcnow() + timedelta(seconds=FOCUS_TIMER_SECONDS)).timestamp())
+        view = FocusTimerView(user_id)
+        await interaction.response.send_message(
+            f"⏱️ 集中タイムを開始します！開発（programming）の経験値に連動します。\n"
+            f"終了予定: <t:{end_ts}:R>（<t:{end_ts}:t>）",
+            view=view,
+            ephemeral=True
+        )
 
-        await channel.send(msg)
+        task = asyncio.create_task(run_focus_timer(interaction.channel, user_id, interaction.user.mention))
+        active_focus_timers[user_id] = task
 
     @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=1)
     async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
