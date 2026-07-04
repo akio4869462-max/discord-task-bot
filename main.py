@@ -132,7 +132,7 @@ class TaskMenuView(View):
 
     @discord.ui.button(label="タスク追加", style=discord.ButtonStyle.primary)
     async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TaskAddModal())
+        await interaction.response.send_message("カテゴリを選んでね：", view=TaskCategorySelectView(), ephemeral=True)
 
     @discord.ui.button(label="タスク完了プルダウン", style=discord.ButtonStyle.danger)
     async def done_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -145,54 +145,71 @@ class TaskMenuView(View):
             await interaction.response.send_message("完了するタスクをメニューから選んでね：", view=view, ephemeral=True)
 
 
+class TaskCategorySelectView(View):
+    """タスク追加の1ステップ目：カテゴリをボタンで選ばせるView（typoによる誤登録を防ぐ）"""
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="💻 開発", style=discord.ButtonStyle.primary)
+    async def programming_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TaskAddModal("programming"))
+
+    @discord.ui.button(label="📝 書類・面接", style=discord.ButtonStyle.primary)
+    async def document_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TaskAddModal("document"))
+
+    @discord.ui.button(label="📚 インプット", style=discord.ButtonStyle.primary)
+    async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TaskAddModal("reading"))
+
+
 class TaskAddModal(discord.ui.Modal, title='📝 新しいタスクの追加'):
-    """ボタン押下時にポップアップするタスク入力モーダルフォーム"""
+    """カテゴリ選択後にポップアップする、タスク内容・期限入力用のモーダルフォーム"""
     task_input = discord.ui.TextInput(
-        label='タスクの内容', 
-        placeholder='例: 職務経歴書の推敲、ボットのUI拡張など', 
+        label='タスクの内容',
+        placeholder='例: 職務経歴書の推敲、ボットのUI拡張など',
         required=True
     )
-    category_input = discord.ui.TextInput(
-        label='カテゴリ（開発 / 書類 / 本）', 
-        placeholder='「開発」「書類」「本」のいずれか（空欄なら開発）', 
-        required=False,
-        max_length=10
-    )
     deadline_input = discord.ui.TextInput(
-        label='期限・締切（月/日）', 
-        placeholder='例: 6/15, 2026-06-15 など（空欄なら期限なし）', 
+        label='期限・締切（月/日）',
+        placeholder='例: 6/15, 2026-06-15 など（空欄なら期限なし）',
         required=False,
         max_length=15
     )
-    # ⭕ 優先度を入力できる欄を新設！
-    priority_input = discord.ui.TextInput(
-        label='優先度（3:高 / 2:中 / 1:低）', 
-        placeholder='数字の 1 ～ 3 を入力してね（空欄なら 2:中 になります）', 
-        required=False,
-        max_length=1
-    )
+
+    def __init__(self, category):
+        super().__init__()
+        self.category = category
 
     async def on_submit(self, interaction: discord.Interaction):
-        raw_cat = self.category_input.value.strip()
-        raw_deadline = self.deadline_input.value.strip()
-        raw_priority = self.priority_input.value.strip()
-        
-        # カテゴリのマッピング
-        category = 'programming'
-        if raw_cat in ['書類', '面接', 'document', 'd']:
-            category = 'document'
-        elif raw_cat in ['インプット', '本', '読書', 'reading', 'r']:
-            category = 'reading'
-            
-        # ⭕ 優先度数値のパース処理
-        priority = 2
-        if raw_priority.isdigit():
-            p_val = int(raw_priority)
-            if p_val in [1, 2, 3]:
-                priority = p_val
-            
-        result_msg = task_logic.add_task(self.task_input.value, category, raw_deadline, priority)
+        # ⭕ 優先度はここでは確定させず、次のステップ（ボタン選択）に引き継ぐ
+        view = TaskPrioritySelectView(self.task_input.value, self.category, self.deadline_input.value.strip())
+        await interaction.response.send_message("優先度を選んでね：", view=view, ephemeral=True)
+
+
+class TaskPrioritySelectView(View):
+    """タスク追加の最終ステップ：優先度をボタンで選ばせ、登録を確定するView"""
+    def __init__(self, task_text, category, deadline_str):
+        super().__init__(timeout=60)
+        self.task_text = task_text
+        self.category = category
+        self.deadline_str = deadline_str
+
+    async def _finish(self, interaction: discord.Interaction, priority):
+        result_msg = task_logic.add_task(self.task_text, self.category, self.deadline_str, priority)
         await interaction.response.send_message(result_msg, ephemeral=True)
+
+    @discord.ui.button(label="★★★ 高", style=discord.ButtonStyle.danger)
+    async def high_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._finish(interaction, 3)
+
+    @discord.ui.button(label="★★☆ 中", style=discord.ButtonStyle.primary)
+    async def mid_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._finish(interaction, 2)
+
+    @discord.ui.button(label="★☆☆ 低", style=discord.ButtonStyle.secondary)
+    async def low_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._finish(interaction, 1)
 
 
 # ⭕ 新設：セレクトメニュー（プルダウン）を内包するタスク完了Viewクラス
@@ -368,7 +385,7 @@ class TaskSelectCombinedView(View):
             self.add_item(TaskDropdownCombined(options))
 
     async def add_task_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(TaskAddModal())
+        await interaction.response.send_message("カテゴリを選んでね：", view=TaskCategorySelectView(), ephemeral=True)
 
 
 class TaskDropdownCombined(Select):
