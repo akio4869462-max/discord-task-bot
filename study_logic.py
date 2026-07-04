@@ -35,6 +35,18 @@ BOSS_LIST = [
 # 1. クイズ・用語集関連のロジック
 # ====================================================
 
+def _load_json(path, default):
+    """指定したJSONファイルを読み込みます。存在しない・壊れている場合はdefaultを返します。"""
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"⚠️ [ERROR] {path} の読み込みに失敗しました: {e}")
+        return default
+
+
 def get_kiso_quiz():
     """登録されている試験用語集からランダムに1問を抽出し、クイズ形式で取得します。
 
@@ -44,24 +56,15 @@ def get_kiso_quiz():
     Returns:
         str: クイズ文、またはデータ未登録の旨を伝えるシステムメッセージ。
     """
-    if not os.path.exists(GLOSSARY_FILE):
-        return "用語データが見つかりません。"
-    
-    try:
-        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
-            glossary = json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
-        return "用語データの読み込み中にエラーが発生しました。"
-    
+    glossary = _load_json(GLOSSARY_FILE, {})
     if not glossary:
-        return "用語が登録されていません。"
+        return "用語が登録されていません。先にメニューから用語をストックしてください。"
 
     # 辞書型構造からランダムに要素を1つ選択
     terms = list(glossary.keys())
     chosen_term = random.choice(terms)
     chosen_desc = glossary[chosen_term]
-    
+
     return f"**【試験用語クイズ】**\n用語: **{chosen_term}**\n解説: ||{chosen_desc}||"
 
 
@@ -100,14 +103,7 @@ def add_kiso(term, desc):
     if not term or not desc:
         return "用語と説明を両方入力してください。"
 
-    glossary = {}
-    if os.path.exists(GLOSSARY_FILE):
-        try:
-            with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
-                glossary = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
-
+    glossary = _load_json(GLOSSARY_FILE, {})
     # 用語をキー、解説文を値として辞書に代入（既存の用語は上書き更新）
     glossary[term] = desc
 
@@ -133,15 +129,9 @@ def search_glossary(word):
     if not word:
         return "検索するキーワードを入力してください。"
 
-    if not os.path.exists(GLOSSARY_FILE):
+    glossary = _load_json(GLOSSARY_FILE, {})
+    if not glossary:
         return "用語集がまだ作成されていません。"
-
-    try:
-        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
-            glossary = json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
-        return "データファイルの読み込みに失敗しました。"
 
     matched = []
     for term, desc in glossary.items():
@@ -161,16 +151,7 @@ def get_glossary_list():
     Returns:
         str: 箇条書き形式で整形された登録用語一覧のメッセージ。
     """
-    if not os.path.exists(GLOSSARY_FILE):
-        return "用語集がまだ作成されていません。"
-
-    try:
-        with open(GLOSSARY_FILE, 'r', encoding='utf-8') as f:
-            glossary = json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"⚠️ [ERROR] 用語集の読み込みに失敗しました: {e}")
-        return "データファイルの読み込みに失敗しました。"
-
+    glossary = _load_json(GLOSSARY_FILE, {})
     if not glossary:
         return "現在、ストックされている用語はありません。"
 
@@ -193,16 +174,9 @@ def load_player_data():
     Returns:
         dict: プレイヤーの各ステータス値を格納した辞書。
     """
-    if os.path.exists(PLAYER_DATA_FILE):
-        try:
-            with open(PLAYER_DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"⚠️ [ERROR] プレイヤーデータの読み込みに失敗しました: {e}")
-            
-    return {
-        "level": 1, 
-        "exp": 0, 
+    return _load_json(PLAYER_DATA_FILE, {
+        "level": 1,
+        "exp": 0,
         "total_minutes": 0,       # 総合累積作業時間（分）
         "programming": 0,         # 開発の累積作業時間（分）
         "document": 0,            # 書類作成の累積作業時間（分）
@@ -211,7 +185,7 @@ def load_player_data():
         "current_boss_idx": 0,
         "boss_hp": 0,
         "minutes_since_last_boss": 0
-    }
+    })
 
 
 def save_player_data(data):
@@ -439,7 +413,6 @@ def check_boss_appearance(data):
     if current_boss_idx < len(BOSS_LIST):
         next_boss = BOSS_LIST[current_boss_idx]
         
-        # ⭕ 旧仕様の total_solved（回答数）を、最新の時間仕様である total_minutes に完全統合
         if data.get('total_minutes', 0) >= next_boss["threshold"]:
             if not data.get("is_boss_active"):
                 data["boss_hp"] = next_boss["hp"]

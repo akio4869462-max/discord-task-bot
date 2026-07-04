@@ -21,7 +21,6 @@ CATEGORY_MAP = {
     'reading': '📚 インプット'
 }
 
-# ⭕ 優先度を視覚化するためのスターマップ
 PRIORITY_MAP = {
     3: '★★★',
     2: '★★☆',
@@ -91,7 +90,7 @@ def add_task(task_text, category='programming', deadline_str=None, priority=2):
         "task": task_text,
         "category": category,
         "deadline": formatted_deadline,
-        "priority": priority  # ⭕ 新しいフィールド
+        "priority": priority
     }
     todo_list.append(new_item)
     save_data(todo_list)
@@ -100,6 +99,17 @@ def add_task(task_text, category='programming', deadline_str=None, priority=2):
     stars = PRIORITY_MAP[priority]
     dl_msg = f"（期限: {formatted_deadline}）" if formatted_deadline else "（期限なし）"
     return f'✅ 【{category_name}】に「{task_text}」を登録しました！ [優先度: {stars}] {dl_msg}'
+
+
+def get_display_fields(item):
+    """タスク辞書から、プルダウン等の表示に使う (タスク内容, 優先度の星) を取り出します。
+
+    list_tasks()を一度でも通したタスクは必ずこの辞書形式になっているため、
+    呼び出し側で辞書かどうかを判定する必要はありません。
+    """
+    task_text = item.get('task', '')
+    stars = PRIORITY_MAP.get(item.get('priority', 2), '★★☆')
+    return task_text, stars
 
 
 def list_tasks():

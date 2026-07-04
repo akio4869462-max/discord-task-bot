@@ -3,7 +3,7 @@ import os
 from datetime import time, timezone, timedelta, datetime
 import discord
 from discord.ext import tasks
-from discord.ui import Button, View, Select  # ⭕ Selectをインポート
+from discord.ui import Button, View, Select
 from dotenv import load_dotenv
 
 import news_logic
@@ -38,48 +38,53 @@ active_focus_timers = {}
 # ====================================================
 # ⏰ 定期自動配信・リマインダータスク（バックグラウンド処理）
 # ====================================================
+def build_deadline_reminders(today_jst):
+    """締切が3日以内に迫っているタスクのリマインダー文言一覧を組み立てます。"""
+    reminders = []
+
+    for item in task_logic.load_data():
+        if not (isinstance(item, dict) and item.get('deadline')):
+            continue
+        try:
+            deadline_date = datetime.strptime(item['deadline'], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        days_left = (deadline_date - today_jst).days
+        if not (0 <= days_left <= 3):
+            continue
+
+        cat_text = task_logic.CATEGORY_MAP.get(item.get('category', 'programming'), '💻 開発')
+        if days_left == 0:
+            reminders.append(f"🚨 **今日が締切！**: [{cat_text}] {item['task']}")
+        else:
+            reminders.append(f"⚠️ **あと {days_left} 日**: [{cat_text}] {item['task']}")
+
+    return reminders
+
+
 @tasks.loop(time=DELIVERY_TIMES)
 async def xml_news_delivery_task():
     """指定された時刻にニュースの自動配信と、朝の時間帯に期限間近のタスクリマインダーを実行します"""
     await client.wait_until_ready()
-    
+
     news_channel = client.get_channel(NEWS_CHANNEL_ID)
     task_channel = client.get_channel(TASK_CHANNEL_ID)
-    
+
     now_jst = datetime.now(JST)
-    
+
     # 🌅 朝の配信（8:00）
     if now_jst.hour == 8:
         print("⏰ [朝の定期処理] ニュース取得 ＆ タスクリマインダーを実行中...")
-        
+
         if news_channel is not None:
             news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
         else:
             print(f"⚠️ [定期配信] ニュースチャンネルが見つかりませんでした。")
-        
+
         if task_channel is not None:
-            todo_list = task_logic.load_data()
-            reminder_tasks = []
-            today_jst = now_jst.date()
-            
-            for item in todo_list:
-                if isinstance(item, dict) and item.get('deadline'):
-                    try:
-                        deadline_date = datetime.strptime(item['deadline'], "%Y-%m-%d").date()
-                        days_left = (deadline_date - today_jst).days
-                        
-                        if 0 <= days_left <= 3:
-                            cat_key = item.get('category', 'programming')
-                            cat_text = task_logic.CATEGORY_MAP.get(cat_key, '💻 開発')
-                            
-                            if days_left == 0:
-                                reminder_tasks.append(f"🚨 **今日が締切！**: [{cat_text}] {item['task']}")
-                            else:
-                                reminder_tasks.append(f"⚠️ **あと {days_left} 日**: [{cat_text}] {item['task']}")
-                    except ValueError:
-                        continue
-            
+            reminder_tasks = build_deadline_reminders(now_jst.date())
             if reminder_tasks:
                 reminder_msg = "📢 **【朝のタスクリマインダー】**\n"
                 reminder_msg += "締切が近づいているタスクがあります！計画的に攻略していきましょう！\n\n"
@@ -87,7 +92,7 @@ async def xml_news_delivery_task():
                 await task_channel.send(reminder_msg)
         else:
             print(f"⚠️ [定期配信] タスクリマインダー用のチャンネルが見つかりませんでした。")
-            
+
     # 🌃 夜の配信（20:00）
     elif now_jst.hour == 20:
         if news_channel is not None:
@@ -176,26 +181,6 @@ def process_task_completion(category):
 # 🎯 UI コンポーネント（Views / Modals）
 # ====================================================
 
-class TaskMenuView(View):
-    """タスク管理機能の下位メニューを制御するViewクラス"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="タスク追加", style=discord.ButtonStyle.primary)
-    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("カテゴリを選んでね：", view=TaskCategorySelectView(), ephemeral=True)
-
-    @discord.ui.button(label="タスク完了プルダウン", style=discord.ButtonStyle.danger)
-    async def done_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        count = task_logic.get_task_count()
-        if count == 0:
-            await interaction.response.send_message("完了するタスクがありません。", ephemeral=True)
-        else:
-            # ⭕ タスク完了用のプルダウンUIを単体で呼び出す
-            view = TaskSelectView()
-            await interaction.response.send_message("完了するタスクをメニューから選んでね：", view=view, ephemeral=True)
-
-
 class TaskCategorySelectView(View):
     """タスク追加の1ステップ目：カテゴリをボタンで選ばせるView（typoによる誤登録を防ぐ）"""
     def __init__(self):
@@ -261,62 +246,6 @@ class TaskPrioritySelectView(View):
     @discord.ui.button(label="★☆☆ 低", style=discord.ButtonStyle.secondary)
     async def low_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._finish(interaction, 1)
-
-
-# ⭕ 新設：セレクトメニュー（プルダウン）を内包するタスク完了Viewクラス
-class TaskSelectView(View):
-    """登録中タスクから動的にプルダウンメニューを生成して完了処理を行うView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-        task_logic.list_tasks()  # 表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存する
-        todo_list = task_logic.load_data()
-
-        options = []
-        for i, item in enumerate(todo_list):
-            # 表示上限が25個までなので安全対策
-            if i >= 25:
-                break
-
-            if isinstance(item, str):
-                task_text = item
-                stars = "★★☆"
-            else:
-                task_text = item.get('task', '')
-                p_val = item.get('priority', 2)
-                stars = task_logic.PRIORITY_MAP.get(p_val, '★★☆')
-
-            # プルダウンの選択肢ラベル（100文字以内のトリミング）
-            label_text = f"{i+1}. [{stars}] {task_text}"
-            if len(label_text) > 90:
-                label_text = label_text[:90] + "..."
-
-            options.append(discord.SelectOption(
-                label=label_text,
-                description=f"このタスクを完了状態（クエストクリア）にします",
-                # ⭕ 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
-                value=item.get('id') if isinstance(item, dict) else str(i + 1)
-            ))
-
-        # セレクトメニューコンポーネントを定義してViewに追加
-        if options:
-            self.add_item(TaskDropdown(options))
-
-
-class TaskDropdown(Select):
-    def __init__(self, options):
-        super().__init__(placeholder='パーフェクトにこなしたタスクを選択...', min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        # ユーザーが選択したvalue（タスクID）を取得
-        selected_value = self.values[0]
-        result_msg, category = task_logic.complete_task(selected_value)
-        rpg_msg, public_msg = process_task_completion(category)
-
-        # 完了メッセージを返却（詳細は本人にのみ表示）
-        await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
-        # レベルアップ・ボス出現/撃破など節目のイベントはチャンネルにも告知する
-        if public_msg:
-            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 class FocusTimerView(View):
@@ -446,7 +375,6 @@ class MainMenuView(View):
     @discord.ui.button(label="📋 タスク管理メニュー", style=discord.ButtonStyle.primary, row=0)
     async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         list_str = task_logic.list_tasks()
-        # ⭕ タスクメニューを開いた際、一緒に完了プルダウンも表示する最強の合わせ技Viewに変更！
         view = TaskSelectCombinedView()
         await interaction.response.send_message(list_str, view=view, ephemeral=True)
 
@@ -463,43 +391,33 @@ class MainMenuView(View):
         await interaction.response.send_message("メニューを選んでください：", view=UtilityMenuView(), ephemeral=True)
 
 
-# ⭕ 新設：「タスク管理画面」用の、ボタン＋プルダウンが合体したView
 class TaskSelectCombinedView(View):
     """タスク一覧テキストの直下に、タスク追加ボタンと完了プルダウンを同時に出すView"""
     def __init__(self):
         super().__init__(timeout=60)
-        
-        # 1. 最初に「タスク追加」のボタンを配置
+
         button = Button(label="新しいタスクを追加", style=discord.ButtonStyle.primary, row=0)
         button.callback = self.add_task_callback
         self.add_item(button)
-        
-        # 2. 次に、現在のタスク一覧からプルダウンの選択肢を作成して配置
-        task_logic.list_tasks()  # 表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存する
+
+        # list_tasks()で表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存してから読み込む
+        task_logic.list_tasks()
         todo_list = task_logic.load_data()
         options = []
         for i, item in enumerate(todo_list):
-            if i >= 25: break  # Discordの上限
-            if isinstance(item, str):
-                task_text = item
-                stars = "★★☆"
-            else:
-                task_text = item.get('task', '')
-                p_val = item.get('priority', 2)
-                stars = task_logic.PRIORITY_MAP.get(p_val, '★★☆')
+            if i >= 25:
+                break  # Discordの上限
 
+            task_text, stars = task_logic.get_display_fields(item)
             label_text = f"{i+1}. [{stars}] {task_text}"
-            if len(label_text) > 90: label_text = label_text[:90] + "..."
+            if len(label_text) > 90:
+                label_text = label_text[:90] + "..."
 
-            options.append(discord.SelectOption(
-                label=label_text,
-                # ⭕ 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
-                value=item.get('id') if isinstance(item, dict) else str(i + 1)
-            ))
+            # 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
+            options.append(discord.SelectOption(label=label_text, value=item['id']))
 
         if options:
-            # row=1 にプルダウンを配置
-            self.add_item(TaskDropdownCombined(options))
+            self.add_item(TaskDropdownCombined(options))  # row=1 にプルダウンを配置
 
     async def add_task_callback(self, interaction: discord.Interaction):
         await interaction.response.send_message("カテゴリを選んでね：", view=TaskCategorySelectView(), ephemeral=True)
@@ -628,7 +546,6 @@ async def on_message(message):
         await message.channel.send(task_logic.add_task(task_text, category, deadline, priority))
         
     elif content == '!list':
-        # ⭕ テキスト入力の !list コマンドの時も、リッチなボタン＆プルダウンViewを一緒に表示！
         list_str = task_logic.list_tasks()
         if "現在、登録されたタスクはありません" in list_str:
             await message.channel.send(list_str)
@@ -647,37 +564,15 @@ async def on_message(message):
     # 🧪 デバッグ用の隠しコマンド
     elif content == '!test_reminder':
         await message.channel.send("🧪 [デバッグ] 朝8時の定期処理を強制実行します...")
-        
+
         news_channel = client.get_channel(NEWS_CHANNEL_ID)
         task_channel = client.get_channel(TASK_CHANNEL_ID)
-        
+
         news_msg = await asyncio.to_thread(news_logic.get_it_news)
         if news_channel:
             await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
-            
-        todo_list = task_logic.load_data()
-        reminder_tasks = []
-        
-        now_jst = datetime.now(JST)
-        today_jst = now_jst.date()
-        
-        for item in todo_list:
-            if isinstance(item, dict) and item.get('deadline'):
-                try:
-                    deadline_date = datetime.strptime(item['deadline'], "%Y-%m-%d").date()
-                    days_left = (deadline_date - today_jst).days
-                    
-                    if 0 <= days_left <= 3:
-                        cat_key = item.get('category', 'programming')
-                        cat_text = task_logic.CATEGORY_MAP.get(cat_key, '💻 開発')
-                        
-                        if days_left == 0:
-                            reminder_tasks.append(f"🚨 **今日が締切！**: [{cat_text}] {item['task']}")
-                        else:
-                            reminder_tasks.append(f"⚠️ **あと {days_left} 日**: [{cat_text}] {item['task']}")
-                except ValueError:
-                    continue
-        
+
+        reminder_tasks = build_deadline_reminders(datetime.now(JST).date())
         if task_channel and reminder_tasks:
             await task_channel.send(f"🧪 **【デバッグリマインダー】**\n締切が近づいているタスクがあります！\n\n" + "\n".join(reminder_tasks))
         elif task_channel:
