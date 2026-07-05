@@ -196,9 +196,3 @@ def complete_task(identifier):
         return _finish_complete(removed)
     else:
         return 'その番号のタスクは見つかりません。', None
-
-
-def get_task_count():
-    """現在のタスクの総数を取得します。"""
-    todo_list = load_data()
-    return len(todo_list)

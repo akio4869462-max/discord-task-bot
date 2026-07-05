@@ -2,11 +2,10 @@
 
 ユーザーの作業時間（ライフログ）を経験値（EXP）に換算し、レベルアップ、
 スキル称号の動的決定、および累積時間に応じた課題ボスバトル等のゲーム要素を制御します。
-試験用語クイズや基数変換クイズなどの学習支援ロジックも統合しています。
+ストックした用語からの試験用語クイズなどの学習支援ロジックも統合しています。
 """
 
 import json
-import math
 import os
 import random
 
@@ -66,28 +65,6 @@ def get_kiso_quiz():
     chosen_desc = glossary[chosen_term]
 
     return f"**【試験用語クイズ】**\n用語: **{chosen_term}**\n解説: ||{chosen_desc}||"
-
-
-def get_math_quiz():
-    """基本情報・ITパスポート試験で頻出の「基数変換」に関する計算クイズを動的に生成します。
-
-    1〜255の範囲（8ビット表現領域）から数値をランダム抽出し、4つの出題モード
-    （10進数→2進数、2進数→10進数、2進数→16進数、16進数→2進数）を自動構築します。
-
-    Returns:
-        str: 動的に生成された計算問題と、隠蔽された正解メッセージ。
-    """
-    target_num = random.randint(1, 255)
-    mode = random.randint(0, 3)
-    
-    if mode == 0:
-        return f"10進数「{target_num}」を 2進数(8bit) に直すと？\n答え: || {format(target_num, '08b')} ||"
-    elif mode == 1:
-        return f"2進数「{format(target_num, '08b')}」を 10進数 に直すと？\n答え: || {target_num} ||"
-    elif mode == 2:
-        return f"2進数「{format(target_num, '08b')}」を 16進数 に直すと？\n答え: || {format(target_num, '02X')} ||"
-    else:
-        return f"16進数「{format(target_num, '02X')}」を 2進数(8bit) に直すと？\n答え: || {format(target_num, '08b')} ||"
 
 
 def add_kiso(term, desc):
