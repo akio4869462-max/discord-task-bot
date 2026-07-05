@@ -8,72 +8,94 @@
 
 ## 🚀 主な機能
 
-### 1. 就活攻略RPGシステム (`study_logic.py`)
+### 1. タスク管理システム (`task_logic.py`)
+* **データ永続化**: 軽量なJSONファイル（`data/todo.json`）をデータベースとして活用し、タスクの追加・一覧表示・完了（削除）操作をボット経由で行えます。各タスクには一意なIDが割り振られ、一覧表示後にタスクが増減・並び替えされても、選択したタスクと異なるタスクを誤って完了してしまう事故を防いでいます。
+* **ボタン選択式の入力**: タスク追加時のカテゴリ・優先度は自由入力ではなくボタン選択方式にしており、入力ミスによる誤ったカテゴリ登録を防いでいます。
+* **優先度＆期限順ソート**: 優先度が高い順、同じ優先度内では期限が近い順に自動で並び替えて表示します。
+* **締切リマインダー**: 締切が3日以内に迫っているタスクを、毎朝8時に自動でチャンネルに通知します。
+
+### 2. 就活攻略RPGシステム (`study_logic.py`)
 * **ライフログのEXP換算**: 集中した作業時間（1分＝10 EXP）を蓄積し、プレイヤーレベルが自動で上昇します。
 * **専門特化型の称号システム**: 「開発」「書類・面接」「インプット」の3カテゴリの累積時間に応じて、就活や開発の進捗にぴったりな称号が動的に付与されます。
 * **課題ボスバトル**: 累積の作業時間が閾値（2時間、5時間、10時間、20時間）に達すると、「職務経歴書の壁」や「圧迫面接の幻影」といった課題ボスが出現。作業時間を重ねることでボスにダメージを与えて撃破する、エンゲージメント性の高い機能を備えています。
-* **学習クイズ機能**: ITパスポート等の頻出用語からランダムに出題するクイズ（ネタバレ防止のスポイラー表示対応）や、基本情報で必須となる「基数変換計算クイズ」を動的に生成します。
+* **達成イベントの公開告知**: レベルアップ・ボス出現・ボス撃破といった節目のイベントは、本人向けの詳細とは別にチャンネルにも告知され、他のメンバーと達成を共有できます。
+* **学習クイズ機能**: ストックした用語からランダムに出題するクイズ（ネタバレ防止のスポイラー表示対応）を搭載しています。
+* **集中タイマー**: 25分間の集中タイマーには、終了予定時刻のリアルタイム表示（Discordのタイムスタンプ機能）とキャンセルボタンを備えています。
 
-### 2. 用語集連動型 ITニュース取得 (`news_logic.py`)
+### 3. 用語集連動型 ITニュース取得 (`news_logic.py`)
 * **スマートRSSパース**: 外部ニュースAPIのIP制限やリクエスト上限を回避するため、ITmediaのRSSフィード（XML）を解析する安定性の高い通信方式を採用。
-* **ストック単語フィルタリング**: ユーザーが自身で登録した用語集（`glossary.json`）のキーワードと、最新ニュースのタイトルをケースインセンシティブで部分一致検索し、自分に関係のある記事だけを最大5件抽出してDiscordへ通知します。
-
-### 3. タスク管理システム (`task_logic.py`)
-* **データ永続化**: 軽量なJSONファイル（`todo.json`）をデータベースとして活用し、タスクの追加、一覧表示、完了（削除）操作をボット経由で行えます。
-* **UI連動**: DiscordのインタラクティブなUI（ボタン等）と連携し、現在のタスク総数に応じた動的なUI制御をサポートするバックエンドAPIを提供します。
+* **ストック単語フィルタリング**: ユーザーが自身で登録した用語集（`data/glossary.json`）のキーワードと、最新ニュースのタイトルをケースインセンシティブで部分一致検索し、自分に関係のある記事だけを最大5件抽出してDiscordへ通知します。
 
 ---
 
 ## 🛠️ 技術スタック・アーキテクチャ
 
-* **Language**: Python 3.10+
-* **Library**: discord.py (Nextcord / angle-bracket等、環境に合わせて要記述)
-* **Data Storage**: JSONファイルによる軽量ファイルベース永続化
+* **Language**: Python 3.11
+* **Library**: discord.py
+* **Data Storage**: JSONファイル（`data/`ディレクトリ配下）による軽量ファイルベース永続化
+* **Infrastructure**: Docker（`docker compose up -d`で起動）＋ GitHub Actionsによる EC2 への自動デプロイ（`main`ブランチへのpushをトリガーに、SSH経由で `git pull && docker compose up -d --build` を実行）
 * **Design Concepts**:
   * マジックナンバーを徹底的に排除した定数管理アーキテクチャ
   * 堅牢なエラーハンドリング（`json.JSONDecodeError`, `IOError`, `ValueError` 等の個別キャッチによるクラッシュ防止）
-  * PEP 8に準拠したクリーンで可読性の高いコード構造と、Googleスタイルのdocstringによるコードドキュメンテーション
+  * 関心の分離（Discordとのやり取りを担う`main.py`と、各種ビジネスロジックを完全に独立したモジュールとして切り分け）
+  * 同期的なネットワークI/O（RSS取得）は`asyncio.to_thread`で別スレッド実行し、Bot全体がブロックされないようにしている
 
 ---
 
 ## 📂 ディレクトリ構成
 
 ```text
-├── main.py          # ボットの起動、Discordイベントハンドリング、UI（View/Modal）の制御
-├── study_logic.py   # クイズ生成、RPGステータス・レベル・ボスバトル制御ロジック
-├── news_logic.py    # RSSフィードの取得およびストック用語によるフィルタリングロジック
-├── task_logic.py    # JSONを介したタスク（ToDo）のCRUD操作・永続化ロジック
-├── glossary.json    # ユーザーが蓄積したIT試験用語・解説のデータストア（自動生成）
-├── player_data.json # プレイヤーのレベル、EXP、カテゴリ別累積時間のデータストア（自動生成）
-└── todo.json        # 登録されたタスク一覧のデータストア（自動生成）
-📦 セットアップと起動方法
-1. リポジトリのクローン
-Bash
-
-
-git clone [https://github.com/ユーザー名/discord-task-bot.git](https://github.com/ユーザー名/discord-task-bot.git)
-cd discord-task-bot
-2. 依存ライブラリのインストール
-Bash
-
-
-pip install -r requirements.txt
-(※ requirements.txt に discord.py 等を記載してください)
-
-3. 環境変数の設定
-プロジェクトのルートディレクトリに .env ファイルを作成し、Discordのボットトークンを設定します。
-
-コード スニペット
-
-
-DISCORD_TOKEN=your_discord_bot_token_here
-4. ボットの起動
-Bash
-
-
-python main.py
-📝 開発の背景・設計のこだわり
-GitHub Codespaces環境やAWS等のクラウドホスティング環境での動作を想定し、外部APIの通信制限（IPブロックや回数制限）に引っかからない堅牢なシステムを意識して設計しました。また、チーム開発や長期的な運用を見据え、関心の分離（Separation of Concerns）を徹底し、Discordのインターフェース部分（main.py）と各種ビジネスロジックを完全に独立したモジュールとして切り分けています。
-
+├── main.py              # ボットの起動、Discordイベントハンドリング、UI（View/Modal）の制御
+├── study_logic.py       # クイズ生成、RPGステータス・レベル・ボスバトル制御ロジック
+├── news_logic.py        # RSSフィードの取得およびストック用語によるフィルタリングロジック
+├── task_logic.py        # JSONを介したタスク（ToDo）のCRUD操作・永続化ロジック
+├── Dockerfile           # Botの実行イメージ定義
+├── docker-compose.yml   # コンテナ起動設定（data/ディレクトリをホストとマウント）
+├── .github/workflows/   # GitHub Actionsによる EC2 自動デプロイ設定
+└── data/                # 実行時に自動生成されるデータストア（Gitでは追跡しない）
+    ├── todo.json        # 登録されたタスク一覧
+    ├── player_data.json # プレイヤーのレベル、EXP、カテゴリ別累積時間
+    └── glossary.json    # ユーザーが蓄積したIT用語・解説
+```
 
 ---
+
+## 📦 セットアップと起動方法
+
+### 1. リポジトリのクローン
+
+```bash
+git clone https://github.com/akio4869462-max/discord-task-bot.git
+cd discord-task-bot
+```
+
+### 2. 環境変数の設定
+
+プロジェクトのルートディレクトリに`.env`ファイルを作成し、以下を設定します。
+
+```
+DISCORD_TOKEN=your_discord_bot_token_here
+NEWS_CHANNEL_ID=your_news_channel_id
+TASK_CHANNEL_ID=your_task_channel_id
+```
+
+### 3-a. ローカルで直接起動する場合
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+### 3-b. Dockerで起動する場合
+
+```bash
+docker compose up -d --build
+```
+
+`main`ブランチにpushすると、GitHub Actions経由でEC2上にも自動的に同じ手順でデプロイされます（`.github/workflows/deploy.yml`）。
+
+---
+
+## 📝 開発の背景・設計のこだわり
+
+GitHub Codespaces環境やAWS等のクラウドホスティング環境での動作を想定し、外部APIの通信制限（IPブロックや回数制限）に引っかからない堅牢なシステムを意識して設計しました。また、チーム開発や長期的な運用を見据え、関心の分離（Separation of Concerns）を徹底し、Discordのインターフェース部分（`main.py`）と各種ビジネスロジックを完全に独立したモジュールとして切り分けています。
