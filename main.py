@@ -100,6 +100,11 @@ async def xml_news_delivery_task():
         else:
             print(f"⚠️ [定期配信] タスクリマインダー用のチャンネルが見つかりませんでした。")
 
+        # 📅 月曜朝は週間サマリーも配信
+        if task_channel is not None and now_jst.weekday() == 0:
+            summary_msg = study_logic.get_weekly_summary()
+            await task_channel.send(summary_msg)
+
     # 🌃 夜の配信（20:00）
     elif now_jst.hour == 20:
         if news_channel is not None:
@@ -661,6 +666,11 @@ async def test_reminder_command(interaction: discord.Interaction):
         await task_channel.send(f"🧪 **【デバッグリマインダー】**\n締切が近づいているタスクがあります！\n\n" + "\n".join(reminder_tasks))
     elif task_channel:
         await task_channel.send("🧪 [デバッグ] 3日以内に締切のタスクはありませんでした。")
+
+    # 曜日に関わらず、週間サマリーもテスト発火できるようにする
+    if task_channel:
+        summary_msg = study_logic.get_weekly_summary()
+        await task_channel.send(f"🧪 **【デバッグ】週間サマリーのテスト配信**\n{summary_msg}")
 
 
 if __name__ == "__main__":

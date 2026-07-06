@@ -184,3 +184,34 @@ def test_get_glossary_list_when_empty():
 
 def test_get_kiso_quiz_when_empty():
     assert '用語が登録されていません' in study_logic.get_kiso_quiz()
+
+
+def test_weekly_summary_reflects_activity_since_last_snapshot():
+    study_logic.add_exp('programming', 60)  # 累計60分, 600 EXP
+
+    summary = study_logic.get_weekly_summary()
+
+    assert '1時間' in summary
+    assert '600 EXP' in summary
+
+
+def test_weekly_summary_updates_snapshot_for_next_comparison():
+    study_logic.add_exp('programming', 60)
+    study_logic.get_weekly_summary()
+
+    # スナップショット更新後は、追加の活動分だけが「今週」としてカウントされる
+    study_logic.add_exp('programming', 30)
+    summary = study_logic.get_weekly_summary()
+
+    assert '30分' in summary
+
+
+def test_weekly_summary_shows_increase_compared_to_previous_week():
+    study_logic.add_exp('programming', 30)
+    study_logic.get_weekly_summary()  # 先週分: 30分
+
+    study_logic.add_exp('programming', 60)
+    summary = study_logic.get_weekly_summary()  # 今週分: 60分 (先週の2倍 = +100%)
+
+    assert '📈' in summary
+    assert '100%' in summary

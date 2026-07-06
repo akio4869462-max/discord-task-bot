@@ -198,6 +198,7 @@ def load_player_data():
         "last_active_date": None,  # 直近で作業報告があった日付（YYYY-MM-DD、JST基準）
         "current_streak": 0,       # 連続で作業報告した日数
         "badges": [],              # 獲得済み実績バッジのID一覧
+        "weekly_snapshot": {},     # 前回の週間サマリー時点での累積値（差分算出用）
     })
 
 
@@ -434,6 +435,44 @@ def get_status_summary():
         msg += f"🏅 獲得バッジ: {', '.join(badge_names)}"
     else:
         msg += "🏅 獲得バッジ: まだありません"
+
+    return msg
+
+
+def get_weekly_summary():
+    """前回の週間サマリー時点からの活動量（差分）を算出し、サマリーメッセージを生成します。
+
+    生成と同時に、次回の差分算出のためのスナップショットを更新します。
+
+    Returns:
+        str: 週間サマリーのメッセージ。
+    """
+    data = load_player_data()
+    snapshot = data.get('weekly_snapshot', {})
+
+    weekly_minutes = data.get('total_minutes', 0) - snapshot.get('total_minutes', 0)
+    weekly_exp = data.get('exp', 0) - snapshot.get('exp', 0)
+
+    msg = "📅 **【週間サマリー】**\n"
+    msg += f"今週の集中時間: {format_minutes_to_hours(weekly_minutes)}\n"
+    msg += f"今週の獲得EXP: {weekly_exp} EXP\n"
+
+    prev_weekly_minutes = snapshot.get('last_weekly_minutes')
+    if prev_weekly_minutes:
+        diff_percent = int(((weekly_minutes - prev_weekly_minutes) / prev_weekly_minutes) * 100)
+        if diff_percent > 0:
+            msg += f"📈 先週より {diff_percent}% 多く集中できました！この調子です！\n"
+        elif diff_percent < 0:
+            msg += f"📉 先週より {abs(diff_percent)}% 少なめでした。来週は巻き返しましょう！\n"
+        else:
+            msg += "先週と同じペースをキープしています。\n"
+
+    data['weekly_snapshot'] = {
+        'total_minutes': data.get('total_minutes', 0),
+        'exp': data.get('exp', 0),
+        'last_weekly_minutes': weekly_minutes,
+    }
+    save_player_data(data)
 
     return msg
 
