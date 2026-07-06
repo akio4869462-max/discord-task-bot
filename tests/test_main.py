@@ -9,30 +9,60 @@ import main
 import task_logic
 
 
+def make_result(is_level_up=False, new_level=None, event=None, streak=1, new_badges=None):
+    """study_logic.add_exp()が返す辞書と同じ形の、テスト用の結果データを組み立てる。"""
+    return {
+        "is_level_up": is_level_up,
+        "new_level": new_level,
+        "event": event,
+        "earned_exp": 0,
+        "streak": streak,
+        "new_badges": new_badges or [],
+    }
+
+
 def test_build_event_message_no_event_no_levelup():
-    detail, public = main.build_event_message(False, None, None)
+    detail, public = main.build_event_message(make_result())
     assert detail == ''
     assert public is None
 
 
 def test_build_event_message_boss_appear():
-    detail, public = main.build_event_message(False, None, 'BOSS_APPEAR')
+    detail, public = main.build_event_message(make_result(event='BOSS_APPEAR'))
     assert 'ボス' in detail
     assert public is not None and 'ボス' in public
 
 
 def test_build_event_message_boss_damage_is_not_publicly_announced():
-    detail, public = main.build_event_message(False, None, 'BOSS_DAMAGE')
+    detail, public = main.build_event_message(make_result(event='BOSS_DAMAGE'))
     assert 'ダメージ' in detail
     assert public is None  # 通常ダメージは公開告知の対象外
 
 
 def test_build_event_message_level_up_and_boss_defeated_combined():
-    detail, public = main.build_event_message(True, 5, 'BOSS_DEFEATED')
+    detail, public = main.build_event_message(make_result(is_level_up=True, new_level=5, event='BOSS_DEFEATED'))
     assert 'Lv.5' in detail
     assert public is not None
     assert 'Lv.5' in public
     assert '撃破' in public
+
+
+def test_build_event_message_streak_milestone_is_announced():
+    detail, public = main.build_event_message(make_result(streak=7))
+    assert '7日連続' in detail
+    assert public is not None and '7日連続' in public
+
+
+def test_build_event_message_non_milestone_streak_is_not_announced():
+    detail, public = main.build_event_message(make_result(streak=5))
+    assert public is None
+
+
+def test_build_event_message_new_badge_is_announced():
+    badge = {"id": "first_boss", "name": "🗡️ 初撃破の証"}
+    detail, public = main.build_event_message(make_result(new_badges=[badge]))
+    assert '初撃破の証' in detail
+    assert public is not None and '初撃破の証' in public
 
 
 @pytest.fixture(autouse=True)

@@ -111,11 +111,13 @@ async def xml_news_delivery_task():
 # ====================================================
 # 🗃️ 共通ヘルパー関数
 # ====================================================
-def build_event_message(is_up, level, event):
-    """レベルアップ・ボスバトルイベントの文言を組み立てます。
+def build_event_message(result):
+    """study_logic.add_exp()の返り値(dict)から、レベルアップ・ボス・連続記録・実績バッジの
+    イベント文言を組み立てます。
 
     ボスへの通常ダメージ（BOSS_DAMAGE）は毎回起きる細かい進捗なので公開告知の対象外とし、
-    レベルアップ・ボス出現・ボス撃破という「節目」だけを公開告知の対象にします。
+    レベルアップ・ボス出現・ボス撃破・連続記録の節目・実績バッジ獲得という「節目」だけを
+    公開告知の対象にします。
 
     Returns:
         tuple: (detail_msg: 本人向けの詳細文言, public_msg: 公開告知文言 または None)
@@ -123,6 +125,7 @@ def build_event_message(is_up, level, event):
     detail_msg = ""
     announcements = []
 
+    event = result["event"]
     if event == "BOSS_APPEAR":
         detail_msg += "\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
         announcements.append("🚨 新たな課題（ボス）が出現しました！")
@@ -132,9 +135,21 @@ def build_event_message(is_up, level, event):
         detail_msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
         announcements.append("🎊 課題ボスを撃破しました！")
 
-    if is_up:
+    if result["is_level_up"]:
+        level = result["new_level"]
         detail_msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{level} になりました！"
         announcements.append(f"🎊 レベルアップ！ Lv.{level} になりました！")
+
+    streak = result["streak"]
+    if streak in study_logic.STREAK_MILESTONES:
+        streak_msg = f"🔥 {streak}日連続達成！EXPボーナスが発生しています！"
+        detail_msg += f"\n{streak_msg}"
+        announcements.append(streak_msg)
+
+    for badge in result["new_badges"]:
+        badge_msg = f"🏅 新しい実績を解除: {badge['name']}"
+        detail_msg += f"\n{badge_msg}"
+        announcements.append(badge_msg)
 
     public_msg = "\n".join(announcements) if announcements else None
     return detail_msg, public_msg
@@ -155,10 +170,10 @@ async def run_focus_timer(channel, user_id, user_mention):
         active_focus_timers.pop(user_id, None)
 
     minutes = int(FOCUS_TIMER_SECONDS / 60)
-    is_up, lv, earned, event = study_logic.report_study("programming", minutes)
-    msg = f"{user_mention} {minutes}分経過しました！お疲れ様でした。☕\n💻 開発作業{minutes}分を自動記録しました！（+{earned} EXP）"
+    result = study_logic.add_exp("programming", minutes)
+    msg = f"{user_mention} {minutes}分経過しました！お疲れ様でした。☕\n💻 開発作業{minutes}分を自動記録しました！（+{result['earned_exp']} EXP）"
 
-    event_detail, _ = build_event_message(is_up, lv if is_up else None, event)
+    event_detail, _ = build_event_message(result)
     msg += event_detail
 
     await channel.send(msg)
@@ -173,12 +188,11 @@ def process_task_completion(category):
     if not category:
         return "", None
 
-    is_up, level_or_diff, event = study_logic.add_exp(category, TASK_COMPLETE_MINUTES)
+    result = study_logic.add_exp(category, TASK_COMPLETE_MINUTES)
     cat_name = task_logic.CATEGORY_MAP.get(category, "開発")
-    earned_exp = TASK_COMPLETE_MINUTES * study_logic.EXP_PER_MINUTE
-    detail_msg = f"\n✨ タスク完了ボーナス獲得！ 【{cat_name}】+ {earned_exp} EXP"
+    detail_msg = f"\n✨ タスク完了ボーナス獲得！ 【{cat_name}】+ {result['earned_exp']} EXP"
 
-    event_detail, public_msg = build_event_message(is_up, level_or_diff if is_up else None, event)
+    event_detail, public_msg = build_event_message(result)
     detail_msg += event_detail
 
     return detail_msg, public_msg
@@ -519,10 +533,10 @@ class WorkReportModal(discord.ui.Modal):
             return
 
         minutes = int(self.count_input.value)
-        is_up, lv, earned, event = study_logic.report_study(self.cat_id, minutes)
-        msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{earned} EXP 獲得！"
+        result = study_logic.add_exp(self.cat_id, minutes)
+        msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{result['earned_exp']} EXP 獲得！"
 
-        event_detail, public_msg = build_event_message(is_up, lv if is_up else None, event)
+        event_detail, public_msg = build_event_message(result)
         msg += event_detail
 
         await interaction.response.send_message(msg, ephemeral=True)

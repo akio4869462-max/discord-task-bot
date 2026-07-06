@@ -8,12 +8,15 @@
 import json
 import os
 import random
+from datetime import datetime, timedelta, timezone
 
 # ====================================================
 # ⚙️ システム定数・設定値
 # ====================================================
 PLAYER_DATA_FILE = os.path.join('data', 'player_data.json')
 GLOSSARY_FILE = os.path.join('data', 'glossary.json')
+
+JST = timezone(timedelta(hours=9))
 
 # ゲームバランス調整用定数
 EXP_PER_MINUTE = 10         # 1分間の作業で獲得できる基礎経験値
@@ -27,6 +30,36 @@ BOSS_LIST = [
     {"threshold": 300, "name": "魔のコーディングテスト", "hp": 60},  # 累計5時間作業で出現
     {"threshold": 600, "name": "圧迫面接の幻影", "hp": 120},       # 累計10時間作業で出現
     {"threshold": 1200, "name": "内定を阻む最終関門", "hp": 300},   # 累計20時間作業で出現
+]
+
+# 【連続記録ボーナスの定義】
+# 連続で作業報告をした日数(streak)に応じたEXPボーナス倍率。閾値の大きい順に並べ、
+# 最初に条件を満たしたものを採用する
+STREAK_BONUS_TIERS = [
+    (30, 0.5),
+    (14, 0.3),
+    (7, 0.2),
+    (3, 0.1),
+]
+# ⭕ 節目に達した「その日」だけ公開告知するための一覧（毎日告知すると煩雑になるため）
+STREAK_MILESTONES = [threshold for threshold, _ in STREAK_BONUS_TIERS]
+
+# 【実績バッジの定義】
+# 一度条件を満たすと、その後条件を満たさなくなっても記録として残り続ける
+BADGE_DEFINITIONS = [
+    {"id": "first_boss", "name": "🗡️ 初撃破の証", "condition": lambda d: d.get('current_boss_idx', 0) >= 1},
+    {"id": "boss_slayer", "name": "⚔️ ボスハンター", "condition": lambda d: d.get('current_boss_idx', 0) >= len(BOSS_LIST)},
+    {"id": "level_5", "name": "🛡️ 実力派の証", "condition": lambda d: d.get('level', 1) >= 5},
+    {"id": "level_10", "name": "👑 歴戦の勇者", "condition": lambda d: d.get('level', 1) >= 10},
+    {"id": "10_hours", "name": "⏳ 継続の証（10時間）", "condition": lambda d: d.get('total_minutes', 0) >= 600},
+    {"id": "100_hours", "name": "💯 継続王（100時間）", "condition": lambda d: d.get('total_minutes', 0) >= 6000},
+    {"id": "streak_7", "name": "🔥 週間皆勤賞", "condition": lambda d: d.get('current_streak', 0) >= 7},
+    {"id": "streak_30", "name": "🌟 月間皆勤賞", "condition": lambda d: d.get('current_streak', 0) >= 30},
+    {
+        "id": "balanced_master",
+        "name": "🏆 全方位マスター",
+        "condition": lambda d: d.get('programming', 0) >= 500 and d.get('document', 0) >= 200 and d.get('reading', 0) >= 200,
+    },
 ]
 
 
@@ -161,7 +194,10 @@ def load_player_data():
         "is_boss_active": False,
         "current_boss_idx": 0,
         "boss_hp": 0,
-        "minutes_since_last_boss": 0
+        "minutes_since_last_boss": 0,
+        "last_active_date": None,  # 直近で作業報告があった日付（YYYY-MM-DD、JST基準）
+        "current_streak": 0,       # 連続で作業報告した日数
+        "badges": [],              # 獲得済み実績バッジのID一覧
     })
 
 
@@ -179,23 +215,78 @@ def save_player_data(data):
         print(f"⚠️ [ERROR] プレイヤーデータの保存に失敗しました: {e}")
 
 
+def _update_streak(data):
+    """今日の活動によって連続記録(streak)を更新します。
+
+    前回の活動日が「今日」ならカウント済みなので変更なし、「昨日」なら+1、
+    それ以外（初回・間が空いた）なら1にリセットします。
+
+    Returns:
+        int: 更新後の連続日数。
+    """
+    today_str = datetime.now(JST).strftime('%Y-%m-%d')
+    yesterday_str = (datetime.now(JST) - timedelta(days=1)).strftime('%Y-%m-%d')
+    last_active = data.get('last_active_date')
+
+    if last_active == today_str:
+        pass  # 今日は既にカウント済み
+    elif last_active == yesterday_str:
+        data['current_streak'] = data.get('current_streak', 0) + 1
+    else:
+        data['current_streak'] = 1
+
+    data['last_active_date'] = today_str
+    return data['current_streak']
+
+
+def _streak_bonus_rate(streak):
+    """連続記録の日数から、EXPボーナス倍率（例: 0.1 = +10%）を返します。"""
+    for threshold, bonus in STREAK_BONUS_TIERS:
+        if streak >= threshold:
+            return bonus
+    return 0.0
+
+
+def check_new_badges(data):
+    """未取得の実績バッジのうち、現在のステータスで新たに条件を満たしたものを判定・記録します。
+
+    Returns:
+        list: 今回新しく獲得したバッジ定義（{"id": ..., "name": ...}）のリスト。
+    """
+    earned_ids = set(data.get('badges', []))
+    newly_earned = []
+    for badge in BADGE_DEFINITIONS:
+        if badge['id'] not in earned_ids and badge['condition'](data):
+            earned_ids.add(badge['id'])
+            newly_earned.append(badge)
+    data['badges'] = sorted(earned_ids)
+    return newly_earned
+
+
 def add_exp(category, minutes=25):
-    """作業実績（分数）を基に各種ステータスを更新し、レベルアップやボス戦の各種判定を一元的に実行します。
+    """作業実績（分数）を基に各種ステータスを更新し、レベルアップ・ボス戦・連続記録ボーナス・
+    実績バッジの判定を一元的に実行します。
 
     Args:
         category (str): 作業を行った該当カテゴリ（'programming', 'document', 'reading'）。
         minutes (int): 実績時間（分）。デフォルトは25分。
 
     Returns:
-        tuple: (
-            is_eligible (bool): レベルアップが発生したか否か,
-            result_data (int/dict): 新レベル（昇格時）または不足経験値データ辞書（非昇格時）,
-            event_type (str/None): 発生したボス戦イベントタイプ（'BOSS_APPEAR', 'BOSS_DAMAGE', 'BOSS_DEFEATED' など）
-        )
+        dict: {
+            "is_level_up": bool,
+            "new_level": int/None（レベルアップ時のみ）,
+            "event": str/None（'BOSS_APPEAR', 'BOSS_DAMAGE', 'BOSS_DEFEATED' のいずれか）,
+            "earned_exp": int（ボーナス適用後の実際の獲得EXP）,
+            "streak": int（更新後の連続記録日数）,
+            "new_badges": list（今回新しく獲得したバッジ定義のリスト）,
+        }
     """
     data = load_player_data()
-    earned_exp = minutes * EXP_PER_MINUTE
-    
+
+    streak = _update_streak(data)
+    bonus_rate = _streak_bonus_rate(streak)
+    earned_exp = int(minutes * EXP_PER_MINUTE * (1 + bonus_rate))
+
     # 1. 基礎ステータス値の更新
     data['total_minutes'] = data.get('total_minutes', 0) + minutes
     if category in data:
@@ -203,7 +294,7 @@ def add_exp(category, minutes=25):
     data['exp'] = data.get('exp', 0) + earned_exp
 
     event_type = None
-    
+
     # 2. ボスバトルエンカウント・交戦ロジック
     if not data.get("is_boss_active"):
         data['minutes_since_last_boss'] = data.get('minutes_since_last_boss', 0) + minutes
@@ -212,7 +303,7 @@ def add_exp(category, minutes=25):
             event_type = "BOSS_APPEAR"
     else:
         # ボス交戦中：1分間の作業につきボスへ 1 ダメージ
-        data["boss_hp"] -= minutes  
+        data["boss_hp"] -= minutes
         if data["boss_hp"] <= 0:
             data["boss_hp"] = 0
             data["is_boss_active"] = False
@@ -227,27 +318,19 @@ def add_exp(category, minutes=25):
     if is_eligible:
         data['level'] = next_lv
 
+    # 4. 実績バッジの判定（レベル・ボス・連続記録が全て確定した後に行う）
+    new_badges = check_new_badges(data)
+
     save_player_data(data)
 
-    if is_eligible:
-        return True, next_lv, event_type
-    else:
-        return False, diffs, event_type
-
-
-def report_study(category, minutes):
-    """UI（Modal / 集中タイマー）からの時間実績報告を受け付けるインターフェースラッパー。
-
-    Args:
-        category (str): 報告された作業カテゴリ。
-        minutes (int): 報告された作業時間（分）。
-
-    Returns:
-        tuple: (レベルアップ有無, 新レベル/必要データ, 計算された獲得EXP, 発生イベント名)
-    """
-    is_up, new_lv, event = add_exp(category, minutes)
-    total_earned = minutes * EXP_PER_MINUTE
-    return is_up, new_lv, total_earned, event
+    return {
+        "is_level_up": is_eligible,
+        "new_level": next_lv if is_eligible else None,
+        "event": event_type,
+        "earned_exp": earned_exp,
+        "streak": streak,
+        "new_badges": new_badges,
+    }
 
 
 def check_level_up(data):
@@ -334,8 +417,24 @@ def get_status_summary():
     msg += f"✨ 総合獲得経験値: {current_exp} EXP\n\n"
     msg += f"💻 開発（Programming）: {format_minutes_to_hours(data.get('programming', 0))}\n"
     msg += f"📝 書類・面接（Document）: {format_minutes_to_hours(data.get('document', 0))}\n"
-    msg += f"📚 インプット（Reading）: {format_minutes_to_hours(data.get('reading', 0))}"
-    
+    msg += f"📚 インプット（Reading）: {format_minutes_to_hours(data.get('reading', 0))}\n\n"
+
+    # 連続記録の表示
+    streak = data.get('current_streak', 0)
+    bonus_rate = _streak_bonus_rate(streak)
+    msg += f"🔥 連続記録: {streak}日"
+    if bonus_rate > 0:
+        msg += f"（EXPボーナス +{int(bonus_rate * 100)}%）"
+    msg += "\n"
+
+    # 獲得済みバッジの表示
+    earned_ids = set(data.get('badges', []))
+    if earned_ids:
+        badge_names = [b['name'] for b in BADGE_DEFINITIONS if b['id'] in earned_ids]
+        msg += f"🏅 獲得バッジ: {', '.join(badge_names)}"
+    else:
+        msg += "🏅 獲得バッジ: まだありません"
+
     return msg
 
 
