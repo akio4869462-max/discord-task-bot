@@ -43,6 +43,7 @@
   * 堅牢なエラーハンドリング（`json.JSONDecodeError`, `IOError`, `ValueError` 等の個別キャッチによるクラッシュ防止）
   * 関心の分離（Discordとのやり取りを担う`main.py`と、各種ビジネスロジックを完全に独立したモジュールとして切り分け）
   * 同期的なネットワークI/O（RSS取得）は`asyncio.to_thread`で別スレッド実行し、Bot全体がブロックされないようにしている
+  * コマンドはDiscord標準の**スラッシュコマンド**（`/menu`, `/add`など）で実装。特権インテント（Message Content Intent）が不要になり、引数の型チェック・選択肢・オートコンプリートをDiscord側の仕組みでそのまま活用できる
 
 ---
 

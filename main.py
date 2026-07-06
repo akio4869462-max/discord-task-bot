@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import discord
+from discord import app_commands
 from discord.ext import tasks
 from discord.ui import Button, View, Select
 
@@ -19,9 +20,11 @@ import task_logic
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Discord クライアントの初期化設定
+# ⭕ スラッシュコマンドはDiscordが構造化データとして送ってくるため、
+# テキストコマンド時代に必要だった message_content 特権インテントは不要
 intents = discord.Intents.default()
-intents.message_content = True
 client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
 # ====================================================
 # ⚙️ システム定数・設定値
@@ -534,83 +537,116 @@ class WorkReportModal(discord.ui.Modal):
 @client.event
 async def on_ready():
     print(f'{client.user} が起動しました。')
+    await tree.sync()
+    print("✅ スラッシュコマンドを同期しました。")
     if not xml_news_delivery_task.is_running():
         xml_news_delivery_task.start()
         print("⏰ ニュース自動定期配信タスクを開始しました。")
 
 
-@client.event
-async def on_message(message):
-    """テキストコマンド（プレフィックス形式）のハンドリング処理"""
-    if message.author == client.user:
-        return
-        
-    content = message.content
-    
-    if content == '!menu' or content == '！':
-        view = MainMenuView()
-        await message.channel.send("メニューを選んでください：", view=view)
-        
-    elif content.startswith('!add '):
-        raw_args = content[5:].strip()
-        parts = raw_args.split(maxsplit=2)
-        
-        category = 'programming'
-        task_text = raw_args
-        deadline = None
-        priority = 2  # テキストコマンドはとりあえずデフォルト「中」
-        
-        if len(parts) >= 2:
-            prefix_cat = parts[0]
-            if prefix_cat in ['開発', 'programming', 'code', 'p']:
-                category = 'programming'
-            elif prefix_cat in ['書類', '面接', 'document', 'd']:
-                category = 'document'
-            elif prefix_cat in ['インプット', '本', '読書', 'reading', 'r']:
-                category = 'reading'
-                
-            if len(parts) == 3 and ('/' in parts[1] or '-' in parts[1]):
-                deadline = parts[1]
-                task_text = parts[2]
-            else:
-                task_text = parts[1] if len(parts) == 2 else raw_args
+# ====================================================
+# 🔤 スラッシュコマンド
+# ====================================================
+@tree.command(name="menu", description="操作メニューを表示します")
+async def menu_command(interaction: discord.Interaction):
+    view = MainMenuView()
+    await interaction.response.send_message("メニューを選んでください：", view=view)
 
-        result_msg = task_logic.add_task(task_text, category, deadline, priority)
-        result_msg += await try_sync_to_calendar(task_text, category, deadline)
-        await message.channel.send(result_msg)
-        
-    elif content == '!list':
-        list_str = task_logic.list_tasks()
-        if "現在、登録されたタスクはありません" in list_str:
-            await message.channel.send(list_str)
-        else:
-            view = TaskSelectCombinedView()
-            await message.channel.send(list_str, view=view)
-        
-    elif content.startswith('!done '):
-        result_msg, category = task_logic.complete_task(content[6:].strip())
-        rpg_msg, _ = process_task_completion(category)  # このコマンドは元々チャンネルに公開されるので告知メッセージは不要
-        await message.channel.send(f"{result_msg}{rpg_msg}")
-        
-    elif content.startswith('!s '):
-        await message.channel.send(study_logic.search_glossary(content[3:]))
 
-    # 🧪 デバッグ用の隠しコマンド
-    elif content == '!test_reminder':
-        await message.channel.send("🧪 [デバッグ] 朝8時の定期処理を強制実行します...")
+async def task_autocomplete(interaction: discord.Interaction, current: str):
+    """/done コマンドの引数を、現在登録中のタスク名から絞り込み候補として提示する"""
+    choices = []
+    for item in task_logic.load_data():
+        if not isinstance(item, dict):
+            continue
+        task_text, stars = task_logic.get_display_fields(item)
+        label = f"[{stars}] {task_text}"
+        if current.lower() in label.lower():
+            choices.append(app_commands.Choice(name=label[:100], value=item['id']))
+    return choices[:25]
 
-        news_channel = client.get_channel(NEWS_CHANNEL_ID)
-        task_channel = client.get_channel(TASK_CHANNEL_ID)
 
-        news_msg = await asyncio.to_thread(news_logic.get_it_news)
-        if news_channel:
-            await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
+@tree.command(name="add", description="新しいタスクを追加します")
+@app_commands.describe(
+    task="タスクの内容",
+    category="カテゴリ",
+    deadline="期限（例: 6/15, 2026-06-15）省略可",
+    priority="優先度（省略時は中）",
+)
+@app_commands.choices(
+    category=[
+        app_commands.Choice(name="💻 開発", value="programming"),
+        app_commands.Choice(name="📝 書類・面接", value="document"),
+        app_commands.Choice(name="📚 インプット", value="reading"),
+    ],
+    priority=[
+        app_commands.Choice(name="★★★ 高", value=3),
+        app_commands.Choice(name="★★☆ 中", value=2),
+        app_commands.Choice(name="★☆☆ 低", value=1),
+    ],
+)
+async def add_command(
+    interaction: discord.Interaction,
+    task: str,
+    category: app_commands.Choice[str],
+    deadline: str = None,
+    priority: app_commands.Choice[int] = None,
+):
+    category_value = category.value
+    priority_value = priority.value if priority is not None else 2
 
-        reminder_tasks = build_deadline_reminders(datetime.now(JST).date())
-        if task_channel and reminder_tasks:
-            await task_channel.send(f"🧪 **【デバッグリマインダー】**\n締切が近づいているタスクがあります！\n\n" + "\n".join(reminder_tasks))
-        elif task_channel:
-            await task_channel.send("🧪 [デバッグ] 3日以内に締切のタスクはありませんでした。")
+    result_msg = task_logic.add_task(task, category_value, deadline, priority_value)
+    await interaction.response.send_message(result_msg, ephemeral=True)
+
+    calendar_msg = await try_sync_to_calendar(task, category_value, deadline)
+    if calendar_msg:
+        await interaction.followup.send(calendar_msg.strip(), ephemeral=True)
+
+
+@tree.command(name="list", description="登録されているタスク一覧を表示します")
+async def list_command(interaction: discord.Interaction):
+    list_str = task_logic.list_tasks()
+    if "現在、登録されたタスクはありません" in list_str:
+        await interaction.response.send_message(list_str)
+    else:
+        view = TaskSelectCombinedView()
+        await interaction.response.send_message(list_str, view=view)
+
+
+@tree.command(name="done", description="タスクを完了させます")
+@app_commands.describe(task="完了させるタスク")
+@app_commands.autocomplete(task=task_autocomplete)
+async def done_command(interaction: discord.Interaction, task: str):
+    result_msg, category = task_logic.complete_task(task)
+    rpg_msg, public_msg = process_task_completion(category)
+    await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
+    if public_msg:
+        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
+
+
+@tree.command(name="search", description="ストックした用語を検索します")
+@app_commands.describe(keyword="検索したいキーワード")
+async def search_command(interaction: discord.Interaction, keyword: str):
+    await interaction.response.send_message(study_logic.search_glossary(keyword), ephemeral=True)
+
+
+# 🧪 デバッグ用コマンド
+@tree.command(name="test_reminder", description="[デバッグ]朝8時の定期処理を強制実行します")
+async def test_reminder_command(interaction: discord.Interaction):
+    await interaction.response.send_message("🧪 [デバッグ] 朝8時の定期処理を強制実行します...", ephemeral=True)
+
+    news_channel = client.get_channel(NEWS_CHANNEL_ID)
+    task_channel = client.get_channel(TASK_CHANNEL_ID)
+
+    news_msg = await asyncio.to_thread(news_logic.get_it_news)
+    if news_channel:
+        await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
+
+    reminder_tasks = build_deadline_reminders(datetime.now(JST).date())
+    if task_channel and reminder_tasks:
+        await task_channel.send(f"🧪 **【デバッグリマインダー】**\n締切が近づいているタスクがあります！\n\n" + "\n".join(reminder_tasks))
+    elif task_channel:
+        await task_channel.send("🧪 [デバッグ] 3日以内に締切のタスクはありませんでした。")
 
 
 if __name__ == "__main__":
