@@ -54,9 +54,12 @@
 ├── news_logic.py        # RSSフィードの取得およびストック用語によるフィルタリングロジック
 ├── task_logic.py        # JSONを介したタスク（ToDo）のCRUD操作・永続化ロジック
 ├── calendar_logic.py    # Googleカレンダーへのタスク期限同期ロジック（任意設定）
+├── tests/               # pytestによるユニットテスト
+├── conftest.py          # pytestがリポジトリ直下をimportパスに認識するための設定
+├── requirements-dev.txt # テスト実行に必要な開発用依存ライブラリ
 ├── Dockerfile           # Botの実行イメージ定義
 ├── docker-compose.yml   # コンテナ起動設定（data/ディレクトリをホストとマウント）
-├── .github/workflows/   # GitHub Actionsによる EC2 自動デプロイ設定
+├── .github/workflows/   # GitHub Actionsによる EC2 自動デプロイ・テスト自動実行の設定
 └── data/                # 実行時に自動生成されるデータストア（Gitでは追跡しない）
     ├── todo.json            # 登録されたタスク一覧
     ├── player_data.json     # プレイヤーのレベル、EXP、カテゴリ別累積時間
@@ -112,6 +115,17 @@ docker compose up -d --build
 ```
 
 `main`ブランチにpushすると、GitHub Actions経由でEC2上にも自動的に同じ手順でデプロイされます（`.github/workflows/deploy.yml`）。
+
+### 4. テストの実行
+
+`task_logic.py`・`study_logic.py`・`main.py`の主要ロジックに対するユニットテストを`tests/`配下に用意しています。
+
+```bash
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+`main`ブランチへのpush・PR作成のたびに、GitHub Actions（`.github/workflows/test.yml`）で自動的に実行されます。
 
 ---
 
