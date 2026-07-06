@@ -26,12 +26,16 @@
 * **スマートRSSパース**: 外部ニュースAPIのIP制限やリクエスト上限を回避するため、ITmediaのRSSフィード（XML）を解析する安定性の高い通信方式を採用。
 * **ストック単語フィルタリング**: ユーザーが自身で登録した用語集（`data/glossary.json`）のキーワードと、最新ニュースのタイトルをケースインセンシティブで部分一致検索し、自分に関係のある記事だけを最大5件抽出してDiscordへ通知します。
 
+### 4. Googleカレンダー連携 (`calendar_logic.py`) ※任意設定
+* **期限の自動同期**: 期限付きでタスクを登録すると、サービスアカウント認証を通じてGoogleカレンダーにも同じ内容の終日予定を自動作成します。
+* **設定不要でも動作**: 認証情報（サービスアカウントキー・カレンダーID）が未設定の場合は、この機能だけを静かにスキップし、Bot本体の他の機能には一切影響しません。
+
 ---
 
 ## 🛠️ 技術スタック・アーキテクチャ
 
 * **Language**: Python 3.11
-* **Library**: discord.py
+* **Library**: discord.py, google-api-python-client（Googleカレンダー連携）
 * **Data Storage**: JSONファイル（`data/`ディレクトリ配下）による軽量ファイルベース永続化
 * **Infrastructure**: Docker（`docker compose up -d`で起動）＋ GitHub Actionsによる EC2 への自動デプロイ（`main`ブランチへのpushをトリガーに、SSH経由で `git pull && docker compose up -d --build` を実行）
 * **Design Concepts**:
@@ -49,13 +53,15 @@
 ├── study_logic.py       # クイズ生成、RPGステータス・レベル・ボスバトル制御ロジック
 ├── news_logic.py        # RSSフィードの取得およびストック用語によるフィルタリングロジック
 ├── task_logic.py        # JSONを介したタスク（ToDo）のCRUD操作・永続化ロジック
+├── calendar_logic.py    # Googleカレンダーへのタスク期限同期ロジック（任意設定）
 ├── Dockerfile           # Botの実行イメージ定義
 ├── docker-compose.yml   # コンテナ起動設定（data/ディレクトリをホストとマウント）
 ├── .github/workflows/   # GitHub Actionsによる EC2 自動デプロイ設定
 └── data/                # 実行時に自動生成されるデータストア（Gitでは追跡しない）
-    ├── todo.json        # 登録されたタスク一覧
-    ├── player_data.json # プレイヤーのレベル、EXP、カテゴリ別累積時間
-    └── glossary.json    # ユーザーが蓄積したIT用語・解説
+    ├── todo.json            # 登録されたタスク一覧
+    ├── player_data.json     # プレイヤーのレベル、EXP、カテゴリ別累積時間
+    ├── glossary.json        # ユーザーが蓄積したIT用語・解説
+    └── service_account.json # Googleカレンダー連携用の認証キー（任意設定）
 ```
 
 ---
@@ -77,7 +83,20 @@ cd discord-task-bot
 DISCORD_TOKEN=your_discord_bot_token_here
 NEWS_CHANNEL_ID=your_news_channel_id
 TASK_CHANNEL_ID=your_task_channel_id
+
+# 以下はGoogleカレンダー連携を使う場合のみ必要（任意設定）
+GOOGLE_CALENDAR_ID=your_google_calendar_id
 ```
+
+### 2-a. Googleカレンダー連携を使う場合（任意設定）
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、Google Calendar APIを有効化
+2. サービスアカウントを作成し、JSON形式の鍵を発行してダウンロード
+3. ダウンロードしたファイルを `data/service_account.json` として配置
+4. 同期したいGoogleカレンダーの共有設定で、サービスアカウントのメールアドレス（JSON内の`client_email`）に「予定の変更権限」を付与
+5. `.env` の `GOOGLE_CALENDAR_ID` に、同期したいカレンダーのID（通常は自分のGoogleアカウントのメールアドレス）を設定
+
+この設定を行わない場合、カレンダー連携機能は自動的に無効化され、それ以外の機能には影響しません。
 
 ### 3-a. ローカルで直接起動する場合
 
