@@ -50,6 +50,25 @@ def save_data(data):
         print(f"⚠️ [ERROR] タスクデータ（{DB_FILE}）の保存に失敗しました: {e}")
 
 
+def parse_deadline(deadline_str):
+    """ユーザー入力の期限文字列（例: "6/15", "2026-06-15"）を「YYYY-MM-DD」形式に変換します。
+
+    パースできない場合や未入力の場合はNoneを返します。
+    """
+    if not deadline_str or not deadline_str.strip():
+        return None
+    try:
+        cleaned_str = deadline_str.strip().replace('/', '-')
+        if len(cleaned_str.split('-')) == 2:
+            current_year = datetime.now().year
+            cleaned_str = f"{current_year}-{cleaned_str}"
+
+        dt = datetime.strptime(cleaned_str, "%Y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def add_task(task_text, category='programming', deadline_str=None, priority=2):
     """新しいタスクをカテゴリ情報・期限・優先度付きでデータに追加し、永続化します。
 
@@ -69,19 +88,7 @@ def add_task(task_text, category='programming', deadline_str=None, priority=2):
     if priority not in [1, 2, 3]:
         priority = 2
 
-    # 📅 期限文字列を「YYYY-MM-DD」形式にパース（整形）する
-    formatted_deadline = None
-    if deadline_str and deadline_str.strip():
-        try:
-            cleaned_str = deadline_str.strip().replace('/', '-')
-            if len(cleaned_str.split('-')) == 2:
-                current_year = datetime.now().year
-                cleaned_str = f"{current_year}-{cleaned_str}"
-            
-            dt = datetime.strptime(cleaned_str, "%Y-%m-%d")
-            formatted_deadline = dt.strftime("%Y-%m-%d")
-        except ValueError:
-            pass
+    formatted_deadline = parse_deadline(deadline_str)
 
     todo_list = load_data()
     

@@ -1,17 +1,21 @@
 import asyncio
 import os
 from datetime import time, timezone, timedelta, datetime
+from dotenv import load_dotenv
+
+# 環境変数の読み込み（calendar_logic等がモジュール読み込み時に環境変数を参照するため、
+# 他の自作モジュールをimportするより前に行う必要がある）
+load_dotenv()
+
 import discord
 from discord.ext import tasks
 from discord.ui import Button, View, Select
-from dotenv import load_dotenv
 
+import calendar_logic
 import news_logic
 import study_logic
 import task_logic
 
-# 環境変数の読み込み
-load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Discord クライアントの初期化設定
@@ -177,6 +181,27 @@ def process_task_completion(category):
     return detail_msg, public_msg
 
 
+async def try_sync_to_calendar(task_text, category, deadline_str):
+    """期限が指定されていれば、Googleカレンダーにも予定を同期します。
+
+    カレンダー連携が未設定の場合や、期限が指定されていない場合は何もしません。
+    Google Calendar APIへの通信は同期処理なので、asyncio.to_threadで別スレッド
+    実行し、Bot全体がブロックされないようにしています。
+
+    Returns:
+        str: 案内文言（登録できなかった場合は空文字）。
+    """
+    formatted_deadline = task_logic.parse_deadline(deadline_str)
+    if not formatted_deadline:
+        return ""
+
+    category_name = task_logic.CATEGORY_MAP.get(category, "開発")
+    event_link = await asyncio.to_thread(
+        calendar_logic.create_deadline_event, task_text, category_name, formatted_deadline
+    )
+    return "\n📅 Googleカレンダーにも登録しました。" if event_link else ""
+
+
 # ====================================================
 # 🎯 UI コンポーネント（Views / Modals）
 # ====================================================
@@ -233,7 +258,14 @@ class TaskPrioritySelectView(View):
 
     async def _finish(self, interaction: discord.Interaction, priority):
         result_msg = task_logic.add_task(self.task_text, self.category, self.deadline_str, priority)
+        # ⭕ 先に登録完了を返信してから、Googleカレンダー連携（外部通信）を後追いで行う。
+        # interaction.response.send_message()は受信から約3秒以内に呼ぶ必要があるため、
+        # 応答時間が読めない外部API呼び出しを先に待ってしまうと失敗する可能性がある。
         await interaction.response.send_message(result_msg, ephemeral=True)
+
+        calendar_msg = await try_sync_to_calendar(self.task_text, self.category, self.deadline_str)
+        if calendar_msg:
+            await interaction.followup.send(calendar_msg.strip(), ephemeral=True)
 
     @discord.ui.button(label="★★★ 高", style=discord.ButtonStyle.danger)
     async def high_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -543,7 +575,9 @@ async def on_message(message):
             else:
                 task_text = parts[1] if len(parts) == 2 else raw_args
 
-        await message.channel.send(task_logic.add_task(task_text, category, deadline, priority))
+        result_msg = task_logic.add_task(task_text, category, deadline, priority)
+        result_msg += await try_sync_to_calendar(task_text, category, deadline)
+        await message.channel.send(result_msg)
         
     elif content == '!list':
         list_str = task_logic.list_tasks()
