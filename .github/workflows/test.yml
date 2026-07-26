@@ -1,8 +1,8 @@
 name: Run Tests
 
+# mainへのpush時のテストは deploy.yml 内の test ジョブが担当するため、
+# ここではPRのみを対象にする（二重実行の防止）
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 

@@ -5,8 +5,26 @@ on:
     branches: [ "main" ]
 
 jobs:
+  # ⭕ テスト合格をデプロイの前提条件にする（テストが落ちたら本番反映しない）
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest -v
+
   deploy:
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0

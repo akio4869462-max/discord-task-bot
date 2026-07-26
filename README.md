@@ -28,6 +28,7 @@
 ### 3. 用語集連動型 ITニュース取得 (`news_logic.py`)
 * **スマートRSSパース**: 外部ニュースAPIのIP制限やリクエスト上限を回避するため、ITmediaのRSSフィード（XML）を解析する安定性の高い通信方式を採用。
 * **ストック単語フィルタリング**: ユーザーが自身で登録した用語集（`data/glossary.json`）のキーワードと、最新ニュースのタイトルをケースインセンシティブで部分一致検索し、自分に関係のある記事だけを最大5件抽出してDiscordへ通知します。
+* **テスト可能な関数分割**: 通信（`fetch_rss`）・XML解析（`parse_rss_items`）・抽出（`filter_articles`）・整形（`build_news_message`）を独立した関数に分離し、ネットワークに依存しないユニットテストを実現しています。
 
 ### 4. Googleカレンダー連携 (`calendar_logic.py`) ※任意設定
 * **期限の自動同期**: 期限付きでタスクを登録すると、サービスアカウント認証を通じてGoogleカレンダーにも同じ内容の終日予定を自動作成します。
@@ -122,7 +123,7 @@ docker compose up -d --build
 
 ### 4. テストの実行
 
-`task_logic.py`・`study_logic.py`・`main.py`の主要ロジックに対するユニットテストを`tests/`配下に用意しています。
+`task_logic.py`・`study_logic.py`・`news_logic.py`・`main.py`の主要ロジックに対するユニットテストを`tests/`配下に用意しています。ニュース取得のテストは、RSSフィードをモックに差し替えることでネットワーク接続なしで実行できます。
 
 ```bash
 pip install -r requirements-dev.txt
