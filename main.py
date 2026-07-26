@@ -16,6 +16,7 @@ import calendar_logic
 import news_logic
 import study_logic
 import task_logic
+import training_logic
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 
@@ -100,9 +101,20 @@ async def xml_news_delivery_task():
         else:
             print(f"⚠️ [定期配信] タスクリマインダー用のチャンネルが見つかりませんでした。")
 
+        # 💪 今日のトレーニングメニューも配信
+        if task_channel is not None:
+            image_paths = training_logic.get_today_menu_image_paths()
+            if image_paths:
+                files = [discord.File(p) for p in image_paths]
+                await task_channel.send(training_logic.get_today_menu(), files=files)
+            else:
+                await task_channel.send(training_logic.get_today_menu())
+
         # 📅 月曜朝は週間サマリーも配信
         if task_channel is not None and now_jst.weekday() == 0:
             summary_msg = study_logic.get_weekly_summary()
+            completed, scheduled = training_logic.get_weekly_training_rate()
+            summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
             await task_channel.send(summary_msg)
 
     # 🌃 夜の配信（20:00）
@@ -649,6 +661,47 @@ async def search_command(interaction: discord.Interaction, keyword: str):
     await interaction.response.send_message(study_logic.search_glossary(keyword), ephemeral=True)
 
 
+# ====================================================
+# 💪 トレーニング記録コマンド群（/training menu, log, measure, history）
+# ====================================================
+training_group = app_commands.Group(name="training", description="自宅ダンベルトレーニングの記録")
+
+
+@training_group.command(name="menu", description="今日のトレーニングメニューを表示します")
+async def training_menu_command(interaction: discord.Interaction):
+    image_paths = training_logic.get_today_menu_image_paths()
+    if image_paths:
+        files = [discord.File(p) for p in image_paths]
+        await interaction.response.send_message(training_logic.get_today_menu(), files=files, ephemeral=True)
+    else:
+        await interaction.response.send_message(training_logic.get_today_menu(), ephemeral=True)
+
+
+@training_group.command(name="log", description="今日のトレーニングを完了として記録します")
+@app_commands.describe(note="メモ（任意）")
+async def training_log_command(interaction: discord.Interaction, note: str = None):
+    msg, streak = training_logic.log_session(note)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+    # 連続記録の節目だけチャンネルにも告知する
+    if streak in training_logic.TRAINING_STREAK_MILESTONES:
+        await interaction.channel.send(f"{interaction.user.mention} 🔥 トレーニング{streak}日連続達成！素晴らしいです！")
+
+
+@training_group.command(name="measure", description="体重・お腹周りを記録します")
+@app_commands.describe(weight_kg="体重(kg)", waist_cm="お腹周り(cm)")
+async def training_measure_command(interaction: discord.Interaction, weight_kg: float, waist_cm: float):
+    await interaction.response.send_message(training_logic.log_measurement(weight_kg, waist_cm), ephemeral=True)
+
+
+@training_group.command(name="history", description="体組成の記録一覧を表示します")
+async def training_history_command(interaction: discord.Interaction):
+    await interaction.response.send_message(training_logic.get_measurement_history(), ephemeral=True)
+
+
+tree.add_command(training_group)
+
+
 # 🧪 デバッグ用コマンド
 @tree.command(name="test_reminder", description="[デバッグ]朝8時の定期処理を強制実行します")
 async def test_reminder_command(interaction: discord.Interaction):
@@ -667,9 +720,14 @@ async def test_reminder_command(interaction: discord.Interaction):
     elif task_channel:
         await task_channel.send("🧪 [デバッグ] 3日以内に締切のタスクはありませんでした。")
 
+    if task_channel:
+        await task_channel.send(f"🧪 **【デバッグ】今日のトレーニングメニュー**\n{training_logic.get_today_menu()}")
+
     # 曜日に関わらず、週間サマリーもテスト発火できるようにする
     if task_channel:
         summary_msg = study_logic.get_weekly_summary()
+        completed, scheduled = training_logic.get_weekly_training_rate()
+        summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
         await task_channel.send(f"🧪 **【デバッグ】週間サマリーのテスト配信**\n{summary_msg}")
 
 
