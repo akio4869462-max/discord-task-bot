@@ -417,8 +417,34 @@ class GlossaryMenuView(View):
 
     @discord.ui.button(label="🎲 用語クイズ", style=discord.ButtonStyle.secondary, row=0)
     async def quiz_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        quiz_msg = study_logic.get_kiso_quiz()
-        await interaction.response.send_message(quiz_msg, ephemeral=True)
+        quiz_msg, term = study_logic.get_kiso_quiz()
+        # 出題できた場合のみ、自己採点ボタン付きで返す
+        view = QuizReviewView(term) if term else None
+        await interaction.response.send_message(quiz_msg, view=view, ephemeral=True)
+
+
+class QuizReviewView(View):
+    """用語クイズの自己採点View
+
+    押された結果に応じて次回の出題日を更新し（間隔反復）、
+    連続で押せてしまわないようボタンを閉じます。
+    """
+    def __init__(self, term):
+        super().__init__(timeout=300)
+        self.term = term
+
+    async def _review(self, interaction: discord.Interaction, remembered):
+        result_msg = study_logic.review_term(self.term, remembered)
+        self.stop()
+        await interaction.response.edit_message(content=result_msg, view=None)
+
+    @discord.ui.button(label="✅ 覚えた", style=discord.ButtonStyle.success)
+    async def remembered_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._review(interaction, True)
+
+    @discord.ui.button(label="❌ あやふや", style=discord.ButtonStyle.danger)
+    async def forgot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._review(interaction, False)
 
 
 class ExamMenuView(View):

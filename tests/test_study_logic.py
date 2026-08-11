@@ -1,3 +1,6 @@
+import json
+from datetime import date
+
 import pytest
 
 import study_logic
@@ -183,7 +186,136 @@ def test_get_glossary_list_when_empty():
 
 
 def test_get_kiso_quiz_when_empty():
-    assert '用語が登録されていません' in study_logic.get_kiso_quiz()
+    msg, term = study_logic.get_kiso_quiz()
+    assert '用語が登録されていません' in msg
+    assert term is None
+
+
+# ====================================================
+# 用語集の新形式移行 / 間隔反復（SRS）
+# ====================================================
+
+TODAY = date(2026, 8, 11)
+
+
+def test_load_glossary_migrates_legacy_string_format():
+    """旧形式（値が解説文の文字列）のデータが、解説を保ったまま新形式へ移行される"""
+    with open(study_logic.GLOSSARY_FILE, 'w', encoding='utf-8') as f:
+        json.dump({'AI': '人工知能のこと'}, f, ensure_ascii=False)
+
+    glossary = study_logic.load_glossary()
+
+    assert glossary['AI']['desc'] == '人工知能のこと'
+    assert glossary['AI']['next_review'] is None
+    assert glossary['AI']['interval'] == 0
+
+
+def test_add_kiso_creates_entry_with_srs_fields():
+    study_logic.add_kiso('DNS', '名前解決の仕組み')
+    entry = study_logic.load_glossary()['DNS']
+
+    assert entry['desc'] == '名前解決の仕組み'
+    assert entry['interval'] == 0
+    assert entry['correct_count'] == 0
+
+
+def test_add_kiso_existing_term_updates_desc_without_resetting_progress():
+    study_logic.add_kiso('DNS', '古い説明')
+    study_logic.review_term('DNS', remembered=True, today=TODAY)
+
+    study_logic.add_kiso('DNS', '新しい説明')
+    entry = study_logic.load_glossary()['DNS']
+
+    assert entry['desc'] == '新しい説明'
+    assert entry['correct_count'] == 1  # 復習の進捗は維持される
+
+
+def test_quiz_asks_for_term_given_description():
+    """出題は本番と同じ「説明文→用語」の向きで、答えの用語が伏せられている"""
+    study_logic.add_kiso('DNS', '名前解決の仕組み')
+    msg, term = study_logic.get_kiso_quiz(today=TODAY)
+
+    assert '名前解決の仕組み' in msg   # 説明文は見える
+    assert '||DNS||' in msg           # 用語はスポイラーで隠れている
+    assert term == 'DNS'
+
+
+def test_review_term_correct_answer_extends_interval():
+    study_logic.add_kiso('DNS', '説明')
+
+    study_logic.review_term('DNS', remembered=True, today=TODAY)
+    assert study_logic.load_glossary()['DNS']['interval'] == 1
+
+    study_logic.review_term('DNS', remembered=True, today=TODAY)
+    assert study_logic.load_glossary()['DNS']['interval'] == 2
+
+    study_logic.review_term('DNS', remembered=True, today=TODAY)
+    assert study_logic.load_glossary()['DNS']['interval'] == 4
+
+
+def test_review_term_wrong_answer_resets_interval_to_one_day():
+    study_logic.add_kiso('DNS', '説明')
+    for _ in range(4):
+        study_logic.review_term('DNS', remembered=True, today=TODAY)
+
+    study_logic.review_term('DNS', remembered=False, today=TODAY)
+    entry = study_logic.load_glossary()['DNS']
+
+    assert entry['interval'] == 1
+    assert entry['next_review'] == '2026-08-12'  # 翌日に再出題
+    assert entry['wrong_count'] == 1
+
+
+def test_review_term_interval_is_capped():
+    study_logic.add_kiso('DNS', '説明')
+    for _ in range(20):  # 十分な回数正解しても上限を超えない
+        study_logic.review_term('DNS', remembered=True, today=TODAY)
+
+    assert study_logic.load_glossary()['DNS']['interval'] == study_logic.MAX_REVIEW_INTERVAL_DAYS
+
+
+def test_review_term_unknown_term_returns_message():
+    assert '見つかりません' in study_logic.review_term('存在しない用語', remembered=True, today=TODAY)
+
+
+def test_pick_quiz_term_prioritizes_due_terms():
+    """復習期限が来ている用語が、まだ先の用語より優先して出題される"""
+    study_logic.add_kiso('期限切れ', '説明A')
+    study_logic.add_kiso('まだ先', '説明B')
+
+    # 「まだ先」を遠い将来に設定し、「期限切れ」は未出題(None)のまま残す
+    glossary = study_logic.load_glossary()
+    glossary['まだ先']['next_review'] = '2099-01-01'
+    study_logic.save_glossary(glossary)
+
+    for _ in range(10):  # ランダム選択なので複数回試す
+        term, entry, is_due = study_logic.pick_quiz_term(today=TODAY)
+        assert term == '期限切れ'
+        assert is_due is True
+
+
+def test_pick_quiz_term_falls_back_to_random_when_nothing_due():
+    study_logic.add_kiso('まだ先', '説明')
+    glossary = study_logic.load_glossary()
+    glossary['まだ先']['next_review'] = '2099-01-01'
+    study_logic.save_glossary(glossary)
+
+    term, entry, is_due = study_logic.pick_quiz_term(today=TODAY)
+
+    assert term == 'まだ先'
+    assert is_due is False  # 期限外なのでランダム出題扱い
+
+
+def test_get_glossary_list_shows_review_status():
+    study_logic.add_kiso('未出題の用語', '説明')
+    study_logic.add_kiso('復習済みの用語', '説明')
+    study_logic.review_term('復習済みの用語', remembered=True, today=TODAY)
+
+    result = study_logic.get_glossary_list(today=TODAY)
+
+    assert '🆕 未出題' in result
+    assert '2026-08-12' in result  # 復習済みの用語の次回予定日
+    assert '全2件' in result
 
 
 def test_weekly_summary_reflects_activity_since_last_snapshot():
