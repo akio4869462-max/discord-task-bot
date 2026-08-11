@@ -13,6 +13,7 @@ from discord.ext import tasks
 from discord.ui import Button, View, Select
 
 import calendar_logic
+import exam_logic
 import news_logic
 import study_logic
 import task_logic
@@ -115,6 +116,7 @@ async def xml_news_delivery_task():
             summary_msg = study_logic.get_weekly_summary()
             completed, scheduled = training_logic.get_weekly_training_rate()
             summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
+            summary_msg += exam_logic.get_weekly_exam_summary()
             await task_channel.send(summary_msg)
 
     # 🌃 夜の配信（20:00）
@@ -128,6 +130,21 @@ async def xml_news_delivery_task():
 # ====================================================
 # 🗃️ 共通ヘルパー関数
 # ====================================================
+def parse_positive_int(text):
+    """モーダルの入力文字列を整数に変換します。全角数字も受け付けます。
+
+    str.isdigit()は「²」のような文字にもTrueを返す一方でint()は失敗するため、
+    判定に頼らず実際にint()を試して例外を捕まえる方式にしています。
+
+    Returns:
+        int/None: 変換できた整数。数値として解釈できない場合はNone。
+    """
+    try:
+        return int(text.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
 def build_event_message(result):
     """study_logic.add_exp()の返り値(dict)から、レベルアップ・ボス・連続記録・実績バッジの
     イベント文言を組み立てます。
@@ -404,6 +421,75 @@ class GlossaryMenuView(View):
         await interaction.response.send_message(quiz_msg, ephemeral=True)
 
 
+class ExamMenuView(View):
+    """「資格学習」サブメニュー：過去問演習の記録・成績確認をまとめたView"""
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="📝 演習を記録", style=discord.ButtonStyle.primary, row=0)
+    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "演習した分野を選んでください：", view=ExamFieldSelectView(), ephemeral=True
+        )
+
+    @discord.ui.button(label="📊 演習成績", style=discord.ButtonStyle.secondary, row=0)
+    async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
+
+
+class ExamFieldSelectView(View):
+    """演習記録の1ステップ目：分野をプルダウンで選ばせるView
+
+    分野は6つあり、ボタンだと横幅を圧迫するためセレクトメニューを採用している。
+    """
+    def __init__(self):
+        super().__init__(timeout=60)
+        options = [
+            discord.SelectOption(label=display_name[:100], value=field_id)
+            for field_id, display_name in exam_logic.EXAM_FIELDS.items()
+        ]
+        self.add_item(ExamFieldDropdown(options))
+
+
+class ExamFieldDropdown(Select):
+    def __init__(self, options):
+        super().__init__(placeholder='演習した分野を選択...', min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        # 選んだ分野を引き継いで、問題数・正解数の入力モーダルを開く
+        await interaction.response.send_modal(ExamLogModal(self.values[0]))
+
+
+class ExamLogModal(discord.ui.Modal, title='📝 過去問演習の記録'):
+    """分野選択後にポップアップする、問題数・正解数の入力モーダル"""
+    total_input = discord.ui.TextInput(
+        label='解いた問題数',
+        placeholder='例: 20 （半角数字）',
+        required=True,
+        max_length=4,
+    )
+    correct_input = discord.ui.TextInput(
+        label='正解した問題数',
+        placeholder='例: 13 （半角数字）',
+        required=True,
+        max_length=4,
+    )
+
+    def __init__(self, field):
+        super().__init__()
+        self.field = field
+
+    async def on_submit(self, interaction: discord.Interaction):
+        total = parse_positive_int(self.total_input.value)
+        correct = parse_positive_int(self.correct_input.value)
+        if total is None or correct is None:
+            await interaction.response.send_message("問題数・正解数は数字で入力してください！", ephemeral=True)
+            return
+
+        msg = exam_logic.log_session(self.field, total, correct)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
 class UtilityMenuView(View):
     """「その他」サブメニュー：データ出力・ニュース確認をまとめたView"""
     def __init__(self):
@@ -452,7 +538,11 @@ class MainMenuView(View):
     async def glossary_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=GlossaryMenuView(), ephemeral=True)
 
-    @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="📝 資格学習", style=discord.ButtonStyle.primary, row=1)
+    async def exam_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=ExamMenuView(), ephemeral=True)
+
+    @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=1)
     async def utility_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=UtilityMenuView(), ephemeral=True)
 
@@ -545,11 +635,11 @@ class WorkReportModal(discord.ui.Modal):
     count_input = discord.ui.TextInput(label='作業した時間（分）を入力してください', placeholder='例: 25 （半角数字）', min_length=1, max_length=3)
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not self.count_input.value.isdigit():
-            await interaction.response.send_message("数字（分）で入力してください！", ephemeral=True)
+        minutes = parse_positive_int(self.count_input.value)
+        if minutes is None or minutes <= 0:
+            await interaction.response.send_message("作業時間は1以上の数字（分）で入力してください！", ephemeral=True)
             return
 
-        minutes = int(self.count_input.value)
         result = study_logic.add_exp(self.cat_id, minutes)
         msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{result['earned_exp']} EXP 獲得！"
 
@@ -702,6 +792,39 @@ async def training_history_command(interaction: discord.Interaction):
 tree.add_command(training_group)
 
 
+# ====================================================
+# 📝 応用情報 演習記録コマンド群（/exam log, stats）
+# ====================================================
+exam_group = app_commands.Group(name="exam", description="応用情報技術者試験の過去問演習の記録")
+
+# 分野の選択肢はexam_logic側の定義から生成し、二重管理を避ける
+EXAM_FIELD_CHOICES = [
+    app_commands.Choice(name=display_name, value=field_id)
+    for field_id, display_name in exam_logic.EXAM_FIELDS.items()
+]
+
+
+@exam_group.command(name="log", description="過去問演習の結果を記録します")
+@app_commands.describe(field="演習した分野", total="解いた問題数", correct="正解した問題数")
+@app_commands.choices(field=EXAM_FIELD_CHOICES)
+async def exam_log_command(
+    interaction: discord.Interaction,
+    field: app_commands.Choice[str],
+    total: int,
+    correct: int,
+):
+    msg = exam_logic.log_session(field.value, total, correct)
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+@exam_group.command(name="stats", description="分野別の演習成績・弱点分野を表示します")
+async def exam_stats_command(interaction: discord.Interaction):
+    await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
+
+
+tree.add_command(exam_group)
+
+
 # 🧪 デバッグ用コマンド
 @tree.command(name="test_reminder", description="[デバッグ]朝8時の定期処理を強制実行します")
 async def test_reminder_command(interaction: discord.Interaction):
@@ -728,6 +851,7 @@ async def test_reminder_command(interaction: discord.Interaction):
         summary_msg = study_logic.get_weekly_summary()
         completed, scheduled = training_logic.get_weekly_training_rate()
         summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
+        summary_msg += exam_logic.get_weekly_exam_summary()
         await task_channel.send(f"🧪 **【デバッグ】週間サマリーのテスト配信**\n{summary_msg}")
 
 

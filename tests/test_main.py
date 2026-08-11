@@ -9,6 +9,22 @@ import main
 import task_logic
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('25', 25),
+    ('  25  ', 25),      # 前後の空白は許容
+    ('２５', 25),         # 全角数字も受け付ける
+    ('0', 0),
+    ('-5', -5),          # 符号付きも変換自体は成功する（範囲判定は呼び出し側の責務）
+    ('abc', None),
+    ('', None),
+    ('2.5', None),       # 小数は整数として解釈できない
+    ('²', None),         # isdigit()はTrueだがint()できない文字（クラッシュ防止の要）
+    (None, None),
+])
+def test_parse_positive_int(text, expected):
+    assert main.parse_positive_int(text) == expected
+
+
 def make_result(is_level_up=False, new_level=None, event=None, streak=1, new_badges=None):
     """study_logic.add_exp()が返す辞書と同じ形の、テスト用の結果データを組み立てる。"""
     return {
