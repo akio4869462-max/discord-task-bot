@@ -18,6 +18,7 @@ import news_logic
 import study_logic
 import task_logic
 import training_logic
+import typing_logic
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 
@@ -117,6 +118,7 @@ async def xml_news_delivery_task():
             completed, scheduled = training_logic.get_weekly_training_rate()
             summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
             summary_msg += exam_logic.get_weekly_exam_summary()
+            summary_msg += typing_logic.get_weekly_typing_summary()
             await task_channel.send(summary_msg)
 
     # 🌃 夜の配信（20:00）
@@ -125,6 +127,12 @@ async def xml_news_delivery_task():
             print("⏰ [夜の定期配信] ニュースを取得中...")
             news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
+
+        # ⌨️ タイピング訓練の日次メニューを配信（ドリル本文もすぐ使えるよう続けて送る）
+        if task_channel is not None:
+            await task_channel.send(typing_logic.get_daily_menu())
+            current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
+            await task_channel.send(typing_logic.get_drill_text(current_drill))
 
 
 # ====================================================
@@ -141,6 +149,18 @@ def parse_positive_int(text):
     """
     try:
         return int(text.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def parse_float(text):
+    """モーダルの入力文字列を小数に変換します（afk% のように小数を取りうる項目用）。
+
+    Returns:
+        float/None: 変換できた小数。数値として解釈できない場合はNone。
+    """
+    try:
+        return float(text.strip())
     except (ValueError, AttributeError):
         return None
 
@@ -463,6 +483,84 @@ class ExamMenuView(View):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
 
 
+class TypingMenuView(View):
+    """「タイピング訓練」サブメニュー：日次メニュー・ドリル本文・計測記録をまとめたView"""
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="⌨️ 今日のメニュー", style=discord.ButtonStyle.success, row=0)
+    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(typing_logic.get_daily_menu(), ephemeral=True)
+
+    @discord.ui.button(label="📄 ドリル本文", style=discord.ButtonStyle.primary, row=0)
+    async def drill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "表示するドリルを選んでください：", view=TypingDrillSelectView(), ephemeral=True
+        )
+
+    @discord.ui.button(label="🎯 計測を記録", style=discord.ButtonStyle.primary, row=0)
+    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TypingMeasureModal())
+
+    @discord.ui.button(label="📈 進捗", style=discord.ButtonStyle.secondary, row=1)
+    async def progress_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(typing_logic.get_progress_summary(), ephemeral=True)
+
+    @discord.ui.button(label="🖐️ 指の担当表", style=discord.ButtonStyle.secondary, row=1)
+    async def keys_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(typing_logic.get_key_guide('jis'), ephemeral=True)
+
+    @discord.ui.button(label="⏭️ 次のドリルへ", style=discord.ButtonStyle.secondary, row=1)
+    async def advance_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(typing_logic.advance_drill(), ephemeral=True)
+
+
+class TypingDrillSelectView(View):
+    """表示するドリル（A〜E）をプルダウンで選ばせるView"""
+    def __init__(self):
+        super().__init__(timeout=60)
+        options = [
+            discord.SelectOption(label=f"Drill {did} — {d['name']}"[:100], value=did)
+            for did, d in typing_logic.DRILLS.items()
+        ]
+        options.append(discord.SelectOption(label="Drill E — 英字の弱点補強（keybr）", value="E"))
+        self.add_item(TypingDrillDropdown(options))
+
+
+class TypingDrillDropdown(Select):
+    def __init__(self, options):
+        super().__init__(placeholder='ドリルを選択...', min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            typing_logic.get_drill_text(self.values[0]), ephemeral=True
+        )
+
+
+class TypingMeasureModal(discord.ui.Modal, title='🎯 タイピング計測の記録'):
+    """monkeytypeの計測結果（4指標）を入力するモーダル"""
+    wpm_input = discord.ui.TextInput(label='net WPM', placeholder='例: 24', required=True, max_length=3)
+    accuracy_input = discord.ui.TextInput(label='accuracy(%)', placeholder='例: 89', required=True, max_length=3)
+    consistency_input = discord.ui.TextInput(label='consistency(%)', placeholder='例: 57', required=True, max_length=3)
+    afk_input = discord.ui.TextInput(label='afk(%)', placeholder='例: 2.5', required=True, max_length=5)
+    note_input = discord.ui.TextInput(label='メモ（任意）', placeholder='例: 30秒台で停止', required=False, max_length=100)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        wpm = parse_positive_int(self.wpm_input.value)
+        accuracy = parse_positive_int(self.accuracy_input.value)
+        consistency = parse_positive_int(self.consistency_input.value)
+        afk = parse_float(self.afk_input.value)  # afkは2.5のような小数を取りうる
+
+        if None in (wpm, accuracy, consistency, afk):
+            await interaction.response.send_message(
+                "各項目は数字で入力してください（afkのみ小数可）。", ephemeral=True
+            )
+            return
+
+        msg = typing_logic.log_measurement(wpm, accuracy, consistency, afk, self.note_input.value)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
 class ExamFieldSelectView(View):
     """演習記録の1ステップ目：分野をプルダウンで選ばせるView
 
@@ -567,6 +665,10 @@ class MainMenuView(View):
     @discord.ui.button(label="📝 資格学習", style=discord.ButtonStyle.primary, row=1)
     async def exam_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=ExamMenuView(), ephemeral=True)
+
+    @discord.ui.button(label="⌨️ タイピング", style=discord.ButtonStyle.primary, row=1)
+    async def typing_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=TypingMenuView(), ephemeral=True)
 
     @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=1)
     async def utility_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -851,6 +953,49 @@ async def exam_stats_command(interaction: discord.Interaction):
 tree.add_command(exam_group)
 
 
+# ====================================================
+# ⌨️ タイピング訓練コマンド群（/typing menu, drill, progress, keys）
+# ====================================================
+typing_group = app_commands.Group(name="typing", description="C++タイピング訓練")
+
+
+@typing_group.command(name="menu", description="今日のタイピング訓練メニューを表示します")
+async def typing_menu_command(interaction: discord.Interaction):
+    await interaction.response.send_message(typing_logic.get_daily_menu(), ephemeral=True)
+
+
+@typing_group.command(name="drill", description="ドリル本文を表示します（monkeytypeに貼り付け用）")
+@app_commands.describe(drill="表示するドリル")
+@app_commands.choices(drill=[
+    app_commands.Choice(name="A — 右小指の単独ドリル", value="A"),
+    app_commands.Choice(name="B — シフト側の数字", value="B"),
+    app_commands.Choice(name="C — C++二文字連", value="C"),
+    app_commands.Choice(name="D — 実トークン", value="D"),
+    app_commands.Choice(name="E — 英字の弱点補強（keybr）", value="E"),
+])
+async def typing_drill_command(interaction: discord.Interaction, drill: app_commands.Choice[str]):
+    await interaction.response.send_message(typing_logic.get_drill_text(drill.value), ephemeral=True)
+
+
+@typing_group.command(name="progress", description="計測履歴と目標ラインを表示します")
+async def typing_progress_command(interaction: discord.Interaction):
+    await interaction.response.send_message(typing_logic.get_progress_summary(), ephemeral=True)
+
+
+@typing_group.command(name="keys", description="記号の指の担当表を表示します")
+@app_commands.describe(layout="キーボード配列")
+@app_commands.choices(layout=[
+    app_commands.Choice(name="JIS配列（日本語配列）", value="jis"),
+    app_commands.Choice(name="US配列（英語配列）", value="us"),
+])
+async def typing_keys_command(interaction: discord.Interaction, layout: app_commands.Choice[str] = None):
+    layout_value = layout.value if layout else "jis"
+    await interaction.response.send_message(typing_logic.get_key_guide(layout_value), ephemeral=True)
+
+
+tree.add_command(typing_group)
+
+
 # 🧪 デバッグ用コマンド
 @tree.command(name="test_reminder", description="[デバッグ]朝8時の定期処理を強制実行します")
 async def test_reminder_command(interaction: discord.Interaction):
@@ -878,7 +1023,19 @@ async def test_reminder_command(interaction: discord.Interaction):
         completed, scheduled = training_logic.get_weekly_training_rate()
         summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
         summary_msg += exam_logic.get_weekly_exam_summary()
+        summary_msg += typing_logic.get_weekly_typing_summary()
         await task_channel.send(f"🧪 **【デバッグ】週間サマリーのテスト配信**\n{summary_msg}")
+
+
+@tree.command(name="test_typing_notify", description="[デバッグ]夜20時のタイピング訓練通知を強制実行します")
+async def test_typing_notify_command(interaction: discord.Interaction):
+    await interaction.response.send_message("🧪 [デバッグ] 夜20時のタイピング通知を強制実行します...", ephemeral=True)
+
+    task_channel = client.get_channel(TASK_CHANNEL_ID)
+    if task_channel:
+        await task_channel.send(typing_logic.get_daily_menu())
+        current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
+        await task_channel.send(typing_logic.get_drill_text(current_drill))
 
 
 if __name__ == "__main__":
