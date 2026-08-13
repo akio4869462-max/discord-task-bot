@@ -538,22 +538,34 @@ class TypingDrillDropdown(Select):
 
 
 class TypingMeasureModal(discord.ui.Modal, title='🎯 タイピング計測の記録'):
-    """monkeytypeの計測結果（4指標）を入力するモーダル"""
+    """monkeytypeの計測結果を入力するモーダル
+
+    afkはmonkeytypeが「検出された時だけ」リザルトに表示するため、
+    表示が無いケース（＝実質0%）でも記録できるよう任意入力にしています。
+    """
     wpm_input = discord.ui.TextInput(label='net WPM', placeholder='例: 24', required=True, max_length=3)
     accuracy_input = discord.ui.TextInput(label='accuracy(%)', placeholder='例: 89', required=True, max_length=3)
     consistency_input = discord.ui.TextInput(label='consistency(%)', placeholder='例: 57', required=True, max_length=3)
-    afk_input = discord.ui.TextInput(label='afk(%)', placeholder='例: 2.5', required=True, max_length=5)
+    afk_input = discord.ui.TextInput(
+        label='afk(%)',
+        placeholder='リザルトに表示が無ければ空欄でOK（0%扱い）',
+        required=False,
+        max_length=5,
+    )
     note_input = discord.ui.TextInput(label='メモ（任意）', placeholder='例: 30秒台で停止', required=False, max_length=100)
 
     async def on_submit(self, interaction: discord.Interaction):
         wpm = parse_positive_int(self.wpm_input.value)
         accuracy = parse_positive_int(self.accuracy_input.value)
         consistency = parse_positive_int(self.consistency_input.value)
-        afk = parse_float(self.afk_input.value)  # afkは2.5のような小数を取りうる
+
+        # 空欄はafk検出なし（0%）とみなす。値がある場合のみ数値として解釈する
+        afk_raw = (self.afk_input.value or "").strip()
+        afk = 0.0 if not afk_raw else parse_float(afk_raw)  # afkは2.5のような小数を取りうる
 
         if None in (wpm, accuracy, consistency, afk):
             await interaction.response.send_message(
-                "各項目は数字で入力してください（afkのみ小数可）。", ephemeral=True
+                "各項目は数字で入力してください（afkのみ小数可・空欄可）。", ephemeral=True
             )
             return
 

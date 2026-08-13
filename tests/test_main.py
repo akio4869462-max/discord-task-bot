@@ -25,6 +25,19 @@ def test_parse_positive_int(text, expected):
     assert main.parse_positive_int(text) == expected
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('2.5', 2.5),
+    ('  2.5  ', 2.5),
+    ('10', 10.0),
+    ('０.５', 0.5),   # 全角数字も受け付ける
+    ('abc', None),
+    ('', None),
+    (None, None),
+])
+def test_parse_float(text, expected):
+    assert main.parse_float(text) == expected
+
+
 def make_result(is_level_up=False, new_level=None, event=None, streak=1, new_badges=None):
     """study_logic.add_exp()が返す辞書と同じ形の、テスト用の結果データを組み立てる。"""
     return {
