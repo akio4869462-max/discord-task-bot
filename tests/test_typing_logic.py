@@ -47,6 +47,35 @@ def test_daily_menu_prompts_measurement_after_a_week():
     assert '🎯 **計測**' in menu
 
 
+def test_daily_menu_always_shows_warmup_config():
+    """ウォームアップの設定は毎日明示する（計測と条件が違うため取り違え防止）"""
+    menu = tl.get_daily_menu(today=START)
+    assert tl.WARMUP_CONFIG in menu
+
+
+def test_daily_menu_shows_measurement_config_and_howto_on_measurement_day():
+    menu = tl.get_daily_menu(today=START)  # 未計測なので計測日
+    assert tl.MEASURE_CONFIG in menu
+    assert '計測のやり方' in menu
+    assert 'ウォームアップを済ませてから' in menu
+    assert 'afkはリザルトに出なければ空欄' in menu
+
+
+def test_daily_menu_omits_measurement_howto_on_normal_day():
+    """計測日以外は手順を出さず、通知を簡潔に保つ"""
+    tl.log_measurement(20, 90, 50, 5.0, today=START)
+    menu = tl.get_daily_menu(today=START + timedelta(days=1))
+    assert '計測のやり方' not in menu
+    assert tl.MEASURE_CONFIG not in menu
+
+
+def test_warmup_and_measure_configs_differ():
+    """設定が同一だと計測プロトコルの意味が失われるため、差分があることを保証する"""
+    assert tl.WARMUP_CONFIG != tl.MEASURE_CONFIG
+    assert 'punctuation ON' in tl.MEASURE_CONFIG
+    assert 'punctuation OFF' in tl.WARMUP_CONFIG
+
+
 def test_daily_menu_rotates_principles():
     """大原則は日替わりで1つずつ提示される"""
     shown = {tl.get_daily_menu(today=START + timedelta(days=i)).split('今日の心得')[1]

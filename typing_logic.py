@@ -21,6 +21,11 @@ BASELINE = {"wpm": 17, "accuracy": 89, "consistency": 38, "afk": 10}
 # 週1回の計測を促す間隔（日数）
 MEASUREMENT_INTERVAL_DAYS = 7
 
+# monkeytypeの設定。ウォームアップと計測で条件が違うため、取り違えないよう毎回明示する
+# （条件が変わると数値が比較できなくなり、記録の意味が薄れるため）
+WARMUP_CONFIG = "time 120 / english / numbers ON / punctuation OFF"
+MEASURE_CONFIG = "time 60 / english / numbers ON / punctuation ON"
+
 # 【大原則】毎日1つずつ日替わりで提示し、意識が薄れるのを防ぐ
 PRINCIPLES = [
     "シフトは必ず**反対の手**で押す。`_` `::` `{}` `\"` `|` はすべて「右小指 + 左シフト」。",
@@ -208,13 +213,19 @@ def get_daily_menu(today=None):
     drill = DRILLS.get(current, DRILLS['A'])
 
     msg = "⌨️ **【今日のタイピング訓練】**（15〜20分）\n"
-    msg += "① 2分 ウォームアップ（monkeytype 通常モード・記号なし）\n"
+    msg += f"① 2分 ウォームアップ … `{WARMUP_CONFIG}`\n"
     msg += f"② 8分 記号ドリル **Drill {current}**（{drill['name']}）\n"
-    msg += "③ 5分 Drill E（keybr.com で英字の弱点補強）\n"
+    msg += "③ 5分 Drill E … keybr.com で英字の弱点補強\n"
 
     # 最後の枠は、週1回の計測が溜まっていれば計測、そうでなければDrill D
     if is_measurement_due(today):
-        msg += "④ 5分 🎯 **計測**（60s / english / punctuation ON / numbers ON）\n"
+        msg += f"④ 5分 🎯 **計測** … `{MEASURE_CONFIG}`\n"
+        # 計測日だけ注意点を添える（毎日出すと読み飛ばされるため）
+        msg += "\n🎯 **計測のやり方**\n"
+        msg += "・①のウォームアップを済ませてから測る\n"
+        msg += "・`punctuation` を **ON** に切り替え、`120` → `60` に変更（①とは設定が違う）\n"
+        msg += "・曜日と時間帯を固定する（疲労と時間帯で±10 WPM動く）\n"
+        msg += "・記録は「⌨️ タイピング」→「🎯 計測を記録」から。afkはリザルトに出なければ空欄でOK\n"
     else:
         msg += "④ 5分 Drill D（実トークン）\n"
 
