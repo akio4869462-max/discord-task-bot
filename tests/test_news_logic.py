@@ -370,3 +370,62 @@ def test_detected_terms_exclude_already_tracked(both_stores):
     articles = [{"title": "RAGとエージェントの話", "link": "u1"}]
     got = news_logic.detect_unknown_terms(articles, news_logic.load_stock_keywords())
     assert [t["term"] for t in got] == ["エージェント"]
+
+# ====================================================
+# 抽出パターンの拡張・並び順・上限
+# ====================================================
+
+def test_extract_katakana_compound_with_nakaguro():
+    """中黒でつながる複合語は1語として扱う"""
+    got = news_logic.extract_term_candidates("セキュリティ・バイ・デザインの実践")
+    assert "セキュリティ・バイ・デザイン" in got
+
+
+def test_extract_kanji_prefixed_acronym():
+    """「生成AI」のような漢字接頭辞つきの略語も拾う"""
+    assert "生成AI" in news_logic.extract_term_candidates("生成AIの活用が進む")
+    assert "無線LAN" in news_logic.extract_term_candidates("無線LANの設定")
+
+
+def test_extract_does_not_grab_hiragana_particles():
+    """助詞ごと拾う誤抽出（「理へのAI」等）を避けるため、接頭辞は漢字に限定している"""
+    got = news_logic.extract_term_candidates("総理へのAI家庭教師")
+    assert got == {"AI"}
+    assert not any("へ" in g for g in got)
+
+
+def test_acronyms_rank_above_other_terms_when_tied():
+    """同じ出現回数なら、試験で問われやすい英字略語を先に見せる"""
+    articles = [{"title": "エージェントとROIの話", "link": "u1"}]
+    got = news_logic.detect_unknown_terms(articles, [])
+    assert [t["term"] for t in got] == ["ROI", "エージェント"]
+
+
+def test_frequency_still_beats_acronym_bonus():
+    """略語優先はあくまで同数時の並べ替えで、出現回数を覆さない"""
+    articles = [
+        {"title": "エージェントの話", "link": "u1"},
+        {"title": "エージェント基盤", "link": "u2"},
+        {"title": "ROIの話", "link": "u3"},
+    ]
+    got = news_logic.detect_unknown_terms(articles, [])
+    assert got[0]["term"] == "エージェント"
+
+
+def test_picker_limit_is_larger_than_digest_limit():
+    """通知は読み流せる量に抑えつつ、登録UIでは埋もれた語まで選べるようにする"""
+    assert news_logic.MAX_UNKNOWN_TERMS_PICKER > news_logic.MAX_UNKNOWN_TERMS
+
+
+def test_get_unknown_terms_uses_all_feeds(monkeypatch, both_stores):
+    """単一フィードしか見ないと候補が大きく減るため、全フィードを対象にする"""
+    calls = []
+
+    def spy(url=None):
+        calls.append(url)
+        return SAMPLE_RSS
+
+    monkeypatch.setattr(news_logic, "fetch_rss", spy)
+    news_logic.get_unknown_terms()
+
+    assert calls == news_logic.RSS_FEEDS

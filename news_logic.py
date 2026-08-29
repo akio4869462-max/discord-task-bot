@@ -31,14 +31,17 @@ GLOSSARY_FILE = os.path.join('data', 'glossary.json')
 # トレンド語や製品名がSRSクイズの出題対象に混ざらないようにしている。
 NEWS_KEYWORDS_FILE = os.path.join('data', 'news_keywords.json')
 MAX_DISPLAY_ARTICLES = 5   # Discordに表示する最大記事数
-MAX_UNKNOWN_TERMS = 8      # 未登録語として提示する最大件数
+# 通知は読み流せる量に抑え、登録UIでは埋もれた語まで拾えるよう上限を分ける
+MAX_UNKNOWN_TERMS = 8        # ニュース通知に載せる件数（ダイジェスト）
+MAX_UNKNOWN_TERMS_PICKER = 25  # 登録UIの選択肢の件数（Discordのセレクト上限）
 
 # ====================================================
 # 🆕 未知語検出の設定
 # ====================================================
 # 用語候補の抽出パターン
-_KATAKANA_PATTERN = re.compile(r'[ァ-ヴー]{3,}')  # 3文字以上のカタカナ語
+_KATAKANA_PATTERN = re.compile(r'[ァ-ヴー]{3,}(?:・[ァ-ヴー]+)*')  # カタカナ語（「セキュリティ・バイ・デザイン」等の中黒複合も1語として扱う）
 _ALPHA_PATTERN = re.compile(r'(?<![A-Za-z0-9])[A-Z][A-Za-z0-9]{1,7}(?![A-Za-z0-9])')  # 大文字始まりの英字（LLM, OpenAI, DuckDB 等）
+_KANJI_ALPHA_PATTERN = re.compile(r'(?<![A-Za-z0-9])[一-龥]{2,4}[A-Z][A-Za-z0-9]{1,7}(?![A-Za-z0-9])')  # 生成AI, 無線LAN 等
 _FEED_PREFIX_PATTERN = re.compile(r'^\[[^\]]*\]\s*')  # 「[ITmedia News] 」のような媒体名プレフィックス
 
 # 検出しても学習価値が薄い語。実フィードで頻出したノイズを基に構成しており、
@@ -289,7 +292,19 @@ def extract_term_candidates(title):
     cleaned = _FEED_PREFIX_PATTERN.sub('', title or '')
     candidates = set(_KATAKANA_PATTERN.findall(cleaned))
     candidates |= set(_ALPHA_PATTERN.findall(cleaned))
+    candidates |= set(_KANJI_ALPHA_PATTERN.findall(cleaned))
     return {c for c in candidates if c not in TERM_STOPWORDS}
+
+
+def _term_sort_key(term, count):
+    """検出語の並び順を決めます。
+
+    出現回数を最優先しつつ、同数の場合は英字略語（すべて大文字の2〜6文字）を
+    先に出します。試験で問われる語彙は略語に偏っており、出現回数だけで並べると
+    語順（アルファベット順）で埋もれてしまうためです。
+    """
+    is_acronym = term.isalpha() and term.isupper() and 2 <= len(term) <= 6
+    return (-count, 0 if is_acronym else 1, term)
 
 
 def detect_unknown_terms(articles, stock_keywords, limit=None):
@@ -319,8 +334,9 @@ def detect_unknown_terms(articles, stock_keywords, limit=None):
             # 判断材料として、その語が最初に現れた記事を例として保持する
             examples.setdefault(term, article)
 
-    # 出現回数の多い順。同数の場合は語順を固定して結果を安定させる
-    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    # 出現回数の多い順。ほとんどの語が1〜2回で並ぶため、同数のときは
+    # 応用情報で問われやすい英字略語（ROI, CVSS, NIST等）を先に見せる
+    ordered = sorted(counts.items(), key=lambda kv: _term_sort_key(kv[0], kv[1]))
     return [
         {
             "term": term,
@@ -356,12 +372,13 @@ def get_unknown_terms():
         list[dict]: [{"term", "count", "title", "link"}]。取得に失敗した場合は空リスト。
     """
     try:
-        articles = parse_rss_items(fetch_rss())
+        # fetch_rss()は単一フィードしか取らないため、全フィードを見るこちらを使う
+        articles = fetch_all_articles()
     except Exception as e:
-        print(f"⚠️ [ERROR] 未知語検出のためのRSS取得に失敗しました: {e}")
+        print(f"WARN: 未知語検出のためのRSS取得に失敗しました: {e}")
         return []
 
-    return detect_unknown_terms(articles, load_stock_keywords())
+    return detect_unknown_terms(articles, load_stock_keywords(), limit=MAX_UNKNOWN_TERMS_PICKER)
 
 
 def build_news_message(filtered_articles, stock_keywords):
