@@ -18,6 +18,9 @@ START_DATE = datetime(2026, 8, 12, tzinfo=JST).date()
 # 開始時の基準値。以降の計測はこの値と対比して伸びを見る
 BASELINE = {"wpm": 17, "accuracy": 89, "consistency": 38, "afk": 10}
 
+# 連続練習の節目（この日数に達した日だけ祝う）
+PRACTICE_STREAK_MILESTONES = [3, 7, 14, 30]
+
 # 週1回の計測を促す間隔（日数）
 MEASUREMENT_INTERVAL_DAYS = 7
 
@@ -149,8 +152,11 @@ def _load_json(path, default):
 def load_typing_data():
     """タイピング訓練データを読み込みます。"""
     return _load_json(TYPING_DATA_FILE, {
-        "current_drill": "A",   # 現在取り組んでいる記号ドリル
-        "measurements": [],     # [{"date", "wpm", "accuracy", "consistency", "afk", "note"}]
+        "current_drill": "A",      # 現在取り組んでいる記号ドリル
+        "measurements": [],        # [{"date", "wpm", "accuracy", "consistency", "afk", "note"}]
+        "sessions": [],            # 日々の実施ログ [{"date", "drill"}]
+        "current_streak": 0,       # 連続で練習した日数
+        "last_practice_date": None,
     })
 
 
@@ -292,6 +298,54 @@ def advance_drill():
         f"🎉 Drill {current} クリア！ **Drill {next_drill}（{DRILLS[next_drill]['name']}）** に進みます。\n"
         f"次に進む条件: {DRILLS[next_drill]['next_condition']}"
     )
+
+
+def _update_practice_streak(data, today):
+    """連続練習日数を更新します。
+
+    トレーニングと違い休養日を設けていないため、前日に記録があれば継続、
+    それ以外（初回・間が空いた）は1にリセットします。
+    """
+    today_str = today.strftime('%Y-%m-%d')
+    yesterday_str = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    last = data.get('last_practice_date')
+
+    if last == today_str:
+        pass  # 今日は既にカウント済み
+    elif last == yesterday_str:
+        data['current_streak'] = data.get('current_streak', 0) + 1
+    else:
+        data['current_streak'] = 1
+
+    data['last_practice_date'] = today_str
+    return data['current_streak']
+
+
+def log_practice(today=None):
+    """今日の練習を実施済みとして記録します（計測とは別の、日々の実施ログ）。
+
+    Args:
+        today (date, optional): 基準日（テスト用の注入口）。
+
+    Returns:
+        tuple: (メッセージ, 更新後のstreak または None（既に記録済みの場合）)
+    """
+    today = today or datetime.now(JST).date()
+    data = load_typing_data()
+    today_str = today.strftime("%Y-%m-%d")
+
+    if any(s["date"] == today_str for s in data.get("sessions", [])):
+        return "今日の練習は既に記録済みです。", None
+
+    drill = data.get("current_drill", "A")
+    data.setdefault("sessions", []).append({"date": today_str, "drill": drill})
+    streak = _update_practice_streak(data, today)
+    save_typing_data(data)
+
+    msg = f"✅ 今日の練習（Drill {drill}）を記録しました！お疲れ様でした。\n🔥 連続練習: {streak}日"
+    if streak in PRACTICE_STREAK_MILESTONES:
+        msg += f"\n🎉 {streak}日連続達成！"
+    return msg, streak
 
 
 def log_measurement(wpm, accuracy, consistency, afk, note=None, today=None):

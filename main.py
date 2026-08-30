@@ -105,12 +105,7 @@ async def xml_news_delivery_task():
 
         # 💪 今日のトレーニングメニューも配信
         if task_channel is not None:
-            image_paths = training_logic.get_today_menu_image_paths()
-            if image_paths:
-                files = [discord.File(p) for p in image_paths]
-                await task_channel.send(training_logic.get_today_menu(), files=files)
-            else:
-                await task_channel.send(training_logic.get_today_menu())
+            await send_training_notification(task_channel)
 
         # 📅 月曜朝は週間サマリーも配信
         if task_channel is not None and now_jst.weekday() == 0:
@@ -128,11 +123,9 @@ async def xml_news_delivery_task():
             news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
 
-        # ⌨️ タイピング訓練の日次メニューを配信（ドリル本文もすぐ使えるよう続けて送る）
+        # ⌨️ タイピング訓練の日次メニューを配信
         if task_channel is not None:
-            await task_channel.send(typing_logic.get_daily_menu())
-            current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
-            await task_channel.send(typing_logic.get_drill_text(current_drill))
+            await send_typing_notification(task_channel)
 
 
 # ====================================================
@@ -519,6 +512,44 @@ class ExamMenuView(View):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
 
 
+class DailyLogView(View):
+    """定期通知にそのまま添えて、ワンタップで実施を記録するためのView
+
+    通知が届いた場所で押せることが要点。メニューを辿らせると記録が続かないため、
+    timeout=None で常設し、いつ押しても記録できるようにしている。
+    """
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ 今日の筋トレ完了", style=discord.ButtonStyle.success, custom_id="log_training")
+    async def training_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg, streak = training_logic.log_session()
+        await interaction.response.send_message(msg, ephemeral=True)
+        if streak in training_logic.TRAINING_STREAK_MILESTONES:
+            await interaction.channel.send(
+                f"{interaction.user.mention} 🔥 筋トレ{streak}日連続達成！"
+            )
+
+
+class TypingLogView(View):
+    """夜のタイピング通知に添える、実施記録用のView"""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ 今日の練習完了", style=discord.ButtonStyle.success, custom_id="log_typing")
+    async def practice_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg, streak = typing_logic.log_practice()
+        await interaction.response.send_message(msg, ephemeral=True)
+        if streak in typing_logic.PRACTICE_STREAK_MILESTONES:
+            await interaction.channel.send(
+                f"{interaction.user.mention} 🔥 タイピング{streak}日連続達成！"
+            )
+
+    @discord.ui.button(label="🎯 計測を記録", style=discord.ButtonStyle.secondary, custom_id="log_typing_measure")
+    async def measure_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TypingMeasureModal())
+
+
 class TypingMenuView(View):
     """「タイピング訓練」サブメニュー：日次メニュー・ドリル本文・計測記録をまとめたView"""
     def __init__(self):
@@ -896,11 +927,38 @@ class WorkReportModal(discord.ui.Modal):
 
 
 # ====================================================
+# 📤 定期通知の送信処理
+# ====================================================
+# 定期配信とデバッグコマンドの両方から呼ぶ。片方だけ直して内容がズレるのを防ぐため、
+# 「何を送るか」はここに一本化する。
+async def send_training_notification(channel):
+    """今日のトレーニングメニューを、記録ボタン付きで送信します。"""
+    image_paths = training_logic.get_today_menu_image_paths()
+    # 休養日は記録するものが無いのでボタンを出さない
+    log_view = None if training_logic.is_rest_day() else DailyLogView()
+    files = [discord.File(p) for p in image_paths] if image_paths else None
+    await channel.send(training_logic.get_today_menu(), files=files, view=log_view)
+
+
+async def send_typing_notification(channel):
+    """今日のタイピングメニューとドリル本文を、記録ボタン付きで送信します。"""
+    await channel.send(typing_logic.get_daily_menu())
+    current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
+    # ドリル本文と一緒に記録ボタンを出し、練習後そのまま押せるようにする
+    await channel.send(typing_logic.get_drill_text(current_drill), view=TypingLogView())
+
+
+# ====================================================
 # 🚀 ボット起動時のシステムイベント
 # ====================================================
 @client.event
 async def on_ready():
     print(f'{client.user} が起動しました。')
+
+    # timeout=Noneのボタンは、再起動後も過去の通知上で動くよう明示的に登録し直す必要がある
+    client.add_view(DailyLogView())
+    client.add_view(TypingLogView())
+
     await tree.sync()
     print("✅ スラッシュコマンドを同期しました。")
     if not xml_news_delivery_task.is_running():
@@ -1130,7 +1188,7 @@ async def test_reminder_command(interaction: discord.Interaction):
         await task_channel.send("🧪 [デバッグ] 3日以内に締切のタスクはありませんでした。")
 
     if task_channel:
-        await task_channel.send(f"🧪 **【デバッグ】今日のトレーニングメニュー**\n{training_logic.get_today_menu()}")
+        await send_training_notification(task_channel)
 
     # 曜日に関わらず、週間サマリーもテスト発火できるようにする
     if task_channel:
@@ -1148,9 +1206,7 @@ async def test_typing_notify_command(interaction: discord.Interaction):
 
     task_channel = client.get_channel(TASK_CHANNEL_ID)
     if task_channel:
-        await task_channel.send(typing_logic.get_daily_menu())
-        current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
-        await task_channel.send(typing_logic.get_drill_text(current_drill))
+        await send_typing_notification(task_channel)
 
 
 if __name__ == "__main__":

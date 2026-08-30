@@ -145,3 +145,8 @@ def test_get_today_menu_image_paths_returns_existing_files_for_training_day():
 def test_get_today_menu_image_paths_excludes_missing_files(monkeypatch):
     monkeypatch.setitem(tl.WEEKLY_MENU[0], 'images', ['assets/training/does_not_exist.png'])
     assert tl.get_today_menu_image_paths(weekday=0) == []
+
+def test_is_rest_day():
+    assert tl.is_rest_day(weekday=6) is True
+    for wd in range(6):
+        assert tl.is_rest_day(weekday=wd) is False

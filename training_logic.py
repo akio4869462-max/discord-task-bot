@@ -136,6 +136,13 @@ def save_training_data(data):
         print(f"⚠️ [ERROR] トレーニングデータの保存に失敗しました: {e}")
 
 
+def is_rest_day(weekday=None):
+    """指定した曜日（省略時は今日）が休養日かどうかを返します。"""
+    if weekday is None:
+        weekday = datetime.now(JST).weekday()
+    return WEEKLY_MENU.get(weekday) is None
+
+
 def get_today_menu(weekday=None):
     """指定した曜日（0=月〜6=日、省略時は今日）のトレーニングメニューを整形して返します。"""
     if weekday is None:

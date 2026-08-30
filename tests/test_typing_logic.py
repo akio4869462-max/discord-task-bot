@@ -227,3 +227,57 @@ def test_weekly_summary_urges_measurement_when_overdue():
     tl.log_measurement(24, 89, 57, 2.5, today=START)
     summary = tl.get_weekly_typing_summary(today=START + timedelta(days=8))
     assert '8日経過' in summary
+
+# ====================================================
+# 日次の実施ログ（計測とは別枠）
+# ====================================================
+
+def test_log_practice_records_and_starts_streak():
+    msg, streak = tl.log_practice(today=START)
+    assert "記録しました" in msg
+    assert streak == 1
+    assert tl.load_typing_data()["sessions"][0]["date"] == START.strftime("%Y-%m-%d")
+
+
+def test_log_practice_records_current_drill():
+    tl.advance_drill()  # A -> B
+    tl.log_practice(today=START)
+    assert tl.load_typing_data()["sessions"][0]["drill"] == "B"
+
+
+def test_log_practice_twice_same_day_is_ignored():
+    tl.log_practice(today=START)
+    msg, streak = tl.log_practice(today=START)
+    assert "既に記録済み" in msg
+    assert streak is None
+    assert len(tl.load_typing_data()["sessions"]) == 1
+
+
+def test_practice_streak_increments_on_consecutive_days():
+    tl.log_practice(today=START)
+    _, streak = tl.log_practice(today=START + timedelta(days=1))
+    assert streak == 2
+
+
+def test_practice_streak_resets_after_a_gap():
+    """トレーニングと違い休養日が無いので、1日空けば途切れる"""
+    tl.log_practice(today=START)
+    _, streak = tl.log_practice(today=START + timedelta(days=2))
+    assert streak == 1
+
+
+def test_practice_streak_celebrates_milestones():
+    for i in range(2):
+        tl.log_practice(today=START + timedelta(days=i))
+    msg, streak = tl.log_practice(today=START + timedelta(days=2))
+    assert streak == 3
+    assert "連続達成" in msg
+
+
+def test_practice_log_is_independent_from_measurements():
+    """日々の実施ログと週1計測は別枠で、互いに影響しない"""
+    tl.log_practice(today=START)
+    assert tl.load_typing_data()["measurements"] == []
+
+    tl.log_measurement(20, 90, 50, 0.0, today=START)
+    assert len(tl.load_typing_data()["sessions"]) == 1
