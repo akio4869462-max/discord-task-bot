@@ -33,12 +33,26 @@ tree = app_commands.CommandTree(client)
 # ====================================================
 # ⚙️ システム定数・設定値
 # ====================================================
+def getenv_int(key, default):
+    """環境変数を整数として読みます。
+
+    ⭕ docker-composeの ${VAR} 展開は、対応する.envのキーが無いと変数を
+       「空文字列」として渡します。os.getenv(key, default)のデフォルト引数は
+       変数が完全に未定義の場合しか使われず、空文字列には効かないため、
+       int('')でBot起動時にクラッシュする事故が実際に起きました。
+       ここで空文字列も明示的にデフォルト扱いにして、.envの更新漏れが
+       あっても起動を落とさずフォールバックできるようにします。
+    """
+    value = os.getenv(key)
+    return int(value) if value else default
+
+
 JST = timezone(timedelta(hours=9))
 DELIVERY_TIMES = [time(8, 0, tzinfo=JST), time(20, 0, tzinfo=JST)]
-NEWS_CHANNEL_ID = int(os.getenv('NEWS_CHANNEL_ID', 1498093810356453508))
-TASK_CHANNEL_ID = int(os.getenv('TASK_CHANNEL_ID', NEWS_CHANNEL_ID))
+NEWS_CHANNEL_ID = getenv_int('NEWS_CHANNEL_ID', 1498093810356453508)
+TASK_CHANNEL_ID = getenv_int('TASK_CHANNEL_ID', NEWS_CHANNEL_ID)
 # バックアップの送り先。未設定ならタスク用チャンネルへ送る
-BACKUP_CHANNEL_ID = int(os.getenv('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID))
+BACKUP_CHANNEL_ID = getenv_int('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID)
 # 週次バックアップの実行時刻。8:00の定期配信と処理が重ならないよう10分ずらす
 BACKUP_TIME = time(8, 10, tzinfo=JST)
 BACKUP_WEEKDAY = 0  # 0=月曜

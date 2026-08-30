@@ -9,6 +9,28 @@ import main
 import task_logic
 
 
+# ====================================================
+# 環境変数の読み込み（docker-composeの空文字列展開への耐性）
+# ====================================================
+
+def test_getenv_int_reads_defined_value(monkeypatch):
+    monkeypatch.setenv('SOME_CHANNEL_ID', '12345')
+    assert main.getenv_int('SOME_CHANNEL_ID', 999) == 12345
+
+
+def test_getenv_int_falls_back_when_undefined(monkeypatch):
+    monkeypatch.delenv('SOME_CHANNEL_ID', raising=False)
+    assert main.getenv_int('SOME_CHANNEL_ID', 999) == 999
+
+
+def test_getenv_int_falls_back_when_empty_string(monkeypatch):
+    """docker-composeの ${VAR} 展開は、.envにキーが無いと空文字列を渡す。
+    ここでクラッシュせずデフォルトへフォールバックできることの回帰テスト
+    （本番でint('')によりBotが起動時クラッシュした実際の障害に対応）。"""
+    monkeypatch.setenv('SOME_CHANNEL_ID', '')
+    assert main.getenv_int('SOME_CHANNEL_ID', 999) == 999
+
+
 @pytest.mark.parametrize('text,expected', [
     ('25', 25),
     ('  25  ', 25),      # 前後の空白は許容
