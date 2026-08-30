@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import tasks
 from discord.ui import Button, View, Select
 
+import backup_logic
 import calendar_logic
 import exam_logic
 import news_logic
@@ -36,6 +37,11 @@ JST = timezone(timedelta(hours=9))
 DELIVERY_TIMES = [time(8, 0, tzinfo=JST), time(20, 0, tzinfo=JST)]
 NEWS_CHANNEL_ID = int(os.getenv('NEWS_CHANNEL_ID', 1498093810356453508))
 TASK_CHANNEL_ID = int(os.getenv('TASK_CHANNEL_ID', NEWS_CHANNEL_ID))
+# バックアップの送り先。未設定ならタスク用チャンネルへ送る
+BACKUP_CHANNEL_ID = int(os.getenv('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID))
+# 週次バックアップの実行時刻。8:00の定期配信と処理が重ならないよう10分ずらす
+BACKUP_TIME = time(8, 10, tzinfo=JST)
+BACKUP_WEEKDAY = 0  # 0=月曜
 FOCUS_TIMER_SECONDS = 1500
 
 # タスク完了時に獲得できる疑似作業時間（15分 = 150 EXP）
@@ -700,12 +706,13 @@ class UtilityMenuView(View):
 
     @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=0)
     async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        files = [os.path.join('data', f) for f in ('todo.json', 'player_data.json', 'glossary.json')]
-        found_files = [discord.File(f) for f in files if os.path.exists(f)]
-        if found_files:
-            await interaction.response.send_message("現在のバックアップデータです：", files=found_files, ephemeral=True)
-        else:
-            await interaction.response.send_message("バックアップ対象のファイルが見つかりませんでした。", ephemeral=True)
+        # ⭕ ephemeralな返信は自分にしか見えず消えるため、保管場所としては機能しない。
+        #    週次バックアップと同じ経路でチャンネルへ残す。
+        await interaction.response.defer(ephemeral=True)
+        await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
+        await interaction.followup.send(
+            "バックアップチャンネルへ書き出しました。", ephemeral=True
+        )
 
     @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=0)
     async def news_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -948,6 +955,52 @@ async def send_typing_notification(channel):
     await channel.send(typing_logic.get_drill_text(current_drill), view=TypingLogView())
 
 
+async def run_backup(channel):
+    """データをZIPにまとめてチャンネルへ添付します。
+
+    ⭕ バックアップの失敗でBot本体が止まらないよう、例外はここで受け止めます。
+       「静かに失敗して気づかない」のが一番怖いので、失敗もチャンネルへ通知します。
+    """
+    if channel is None:
+        print("⚠️ [バックアップ] 送信先チャンネルが見つかりませんでした。")
+        return "送信先チャンネルが見つかりませんでした。"
+
+    try:
+        zip_path, included, missing = await asyncio.to_thread(backup_logic.create_archive)
+        message = backup_logic.build_message(zip_path, included, missing)
+
+        if zip_path and backup_logic.is_within_upload_limit(zip_path):
+            await channel.send(message, file=discord.File(zip_path))
+        else:
+            await channel.send(message)
+
+        await asyncio.to_thread(backup_logic.prune_old_archives)
+        print(f"🗄️ [バックアップ] 完了: {included}")
+        return message
+
+    except Exception as error:
+        print(f"❌ [バックアップ] 失敗: {type(error).__name__}: {error}")
+        try:
+            await channel.send(
+                f"❌ **【週次バックアップ】失敗しました**\n`{type(error).__name__}: {error}`"
+            )
+        except Exception:
+            pass
+        return f"失敗しました: {type(error).__name__}: {error}"
+
+
+@tasks.loop(time=BACKUP_TIME)
+async def weekly_backup_task():
+    """毎週決まった曜日に、データのバックアップをDiscordへ自動で書き出します。"""
+    await client.wait_until_ready()
+
+    if datetime.now(JST).weekday() != BACKUP_WEEKDAY:
+        return
+
+    print("🗄️ [週次バックアップ] 実行中...")
+    await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
+
+
 # ====================================================
 # 🚀 ボット起動時のシステムイベント
 # ====================================================
@@ -964,11 +1017,23 @@ async def on_ready():
     if not xml_news_delivery_task.is_running():
         xml_news_delivery_task.start()
         print("⏰ ニュース自動定期配信タスクを開始しました。")
+    if not weekly_backup_task.is_running():
+        weekly_backup_task.start()
+        print("🗄️ 週次バックアップタスクを開始しました。")
 
 
 # ====================================================
 # 🔤 スラッシュコマンド
 # ====================================================
+@tree.command(name="backup", description="いまのデータをZIPにしてバックアップチャンネルへ送ります")
+async def backup_command(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
+    await interaction.followup.send(
+        "バックアップを実行しました。バックアップチャンネルを確認してください。", ephemeral=True
+    )
+
+
 @tree.command(name="menu", description="操作メニューを表示します")
 async def menu_command(interaction: discord.Interaction):
     view = MainMenuView()

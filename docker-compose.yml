@@ -7,6 +7,7 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       NEWS_CHANNEL_ID: ${NEWS_CHANNEL_ID}
       TASK_CHANNEL_ID: ${TASK_CHANNEL_ID}
+      BACKUP_CHANNEL_ID: ${BACKUP_CHANNEL_ID}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID}
     volumes:
       - ./data:/app/data
