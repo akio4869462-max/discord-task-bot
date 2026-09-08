@@ -265,6 +265,33 @@ def process_task_completion(category):
     return detail_msg, public_msg
 
 
+# 過去問1問あたりの目安所要時間（分）。EXP換算のみに使い、演習記録そのものには影響しない。
+EXAM_MINUTES_PER_QUESTION = 1.5
+
+
+def process_exam_completion(total):
+    """過去問演習の記録に応じて、目安時間分のreading EXPを自動付与する。
+
+    以前は演習記録（exam_logic）とRPGのEXP（study_logic）が完全に独立しており、
+    両方欲しい場合は同じ勉強内容を「📚インプットを報告」で二重入力する必要があった。
+    ここで自動連携することで、/exam log の記録だけで両方が揃うようにする。
+
+    Returns:
+        tuple: (detail_msg: 本人向けの追記文言, public_msg: 公開告知文言 または None)
+    """
+    minutes = round(total * EXAM_MINUTES_PER_QUESTION)
+    if minutes <= 0:
+        return "", None
+
+    result = study_logic.add_exp("reading", minutes)
+    detail_msg = f"\n✨ インプットEXPも獲得！（目安{minutes}分相当）+ {result['earned_exp']} EXP"
+
+    event_detail, public_msg = build_event_message(result)
+    detail_msg += event_detail
+
+    return detail_msg, public_msg
+
+
 async def try_sync_to_calendar(task_text, category, deadline_str):
     """期限が指定されていれば、Googleカレンダーにも予定を同期します。
 
@@ -757,7 +784,15 @@ class ExamLogModal(discord.ui.Modal, title='📝 過去問演習の記録'):
             return
 
         msg = exam_logic.log_session(self.field, total, correct)
+        if not msg.startswith("❌"):
+            exp_msg, public_msg = process_exam_completion(total)
+            msg += exp_msg
+        else:
+            public_msg = None
+
         await interaction.response.send_message(msg, ephemeral=True)
+        if public_msg:
+            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 class UtilityMenuView(View):
@@ -1245,7 +1280,15 @@ async def exam_log_command(
     correct: int,
 ):
     msg = exam_logic.log_session(field.value, total, correct)
+    if not msg.startswith("❌"):
+        exp_msg, public_msg = process_exam_completion(total)
+        msg += exp_msg
+    else:
+        public_msg = None
+
     await interaction.response.send_message(msg, ephemeral=True)
+    if public_msg:
+        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 @exam_group.command(name="stats", description="分野別の演習成績・弱点分野を表示します")

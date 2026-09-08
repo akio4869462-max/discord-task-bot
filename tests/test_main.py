@@ -6,6 +6,7 @@ import pytest
 os.environ.setdefault('DISCORD_TOKEN', 'dummy')  # main.pyのimport時にclient.run用のTOKEN取得で使われるだけ
 
 import main
+import study_logic
 import task_logic
 
 
@@ -119,6 +120,33 @@ def test_build_event_message_new_badge_is_announced():
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(task_logic, 'DB_FILE', str(tmp_path / 'todo.json'))
+    monkeypatch.setattr(study_logic, 'PLAYER_DATA_FILE', str(tmp_path / 'player_data.json'))
+
+
+# ====================================================
+# 過去問演習 → RPGのreading EXPへの自動連携
+# ====================================================
+# 以前は演習記録(exam_logic)とRPGのEXP(study_logic)が完全に独立しており、
+# 両方欲しい場合は同じ勉強内容を「📚インプットを報告」で二重入力する必要があった。
+
+def test_process_exam_completion_grants_reading_exp():
+    detail, public = main.process_exam_completion(total=20)  # 20問 × 1.5分 = 30分
+    assert 'EXP' in detail
+    data = study_logic.load_player_data()
+    assert data['reading'] == 30
+
+
+def test_process_exam_completion_uses_rounded_minutes():
+    detail, _ = main.process_exam_completion(total=3)  # 3問 × 1.5分 = 4.5分 → 4分か5分に丸め
+    data = study_logic.load_player_data()
+    assert data['reading'] in (4, 5)
+
+
+def test_process_exam_completion_zero_questions_grants_nothing():
+    detail, public = main.process_exam_completion(total=0)
+    assert detail == ''
+    assert public is None
+    assert study_logic.load_player_data()['reading'] == 0
 
 
 def test_build_deadline_reminders_includes_tasks_within_three_days():
