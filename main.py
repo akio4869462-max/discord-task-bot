@@ -457,25 +457,16 @@ class StudyStatusMenuView(View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-class GlossaryMenuView(View):
-    """「学習・用語」サブメニュー：用語検索・ストック・一覧・クイズをまとめたView"""
+class NewsTermsMenuView(View):
+    """「ニュース用語」サブメニュー：未登録語の検出・追跡語の管理をまとめたView
+
+    ⭕ 以前は用語のストック・検索・一覧・SRSクイズもここにあったが、使われて
+       いなかったため削除した（study_logic.py参照）。ニュースの追跡語専用に縮小。
+    """
     def __init__(self):
         super().__init__(timeout=60)
 
-    @discord.ui.button(label="🔍 用語検索", style=discord.ButtonStyle.secondary, row=0)
-    async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(SearchWordModal())
-
-    @discord.ui.button(label="➕ 用語ストック", style=discord.ButtonStyle.secondary, row=0)
-    async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(KisoAddModal())
-
-    @discord.ui.button(label="📚 用語一覧", style=discord.ButtonStyle.secondary, row=0)
-    async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        list_msg = study_logic.get_glossary_list()
-        await interaction.response.send_message(list_msg, ephemeral=True)
-
-    @discord.ui.button(label="🆕 ニュースの新語", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="🆕 ニュースの新語", style=discord.ButtonStyle.primary, row=0)
     async def unknown_terms_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         # RSS取得は応答時間が読めないため、先に応答を保留してから処理する
         await interaction.response.defer(ephemeral=True)
@@ -489,11 +480,11 @@ class GlossaryMenuView(View):
 
         await interaction.followup.send(
             "ニュースで見つかった未登録の頻出語です。\n"
-            "選んだ語は**ニュースの絞り込み専用**として登録され、用語クイズには出題されません：",
+            "選んだ語はニュースの絞り込みに使われます：",
             view=UnknownTermSelectView(terms), ephemeral=True,
         )
 
-    @discord.ui.button(label="📰 追跡語の管理", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📰 追跡語の管理", style=discord.ButtonStyle.secondary, row=0)
     async def news_keywords_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         keywords = news_logic.load_news_keywords()
         if not keywords:
@@ -504,43 +495,11 @@ class GlossaryMenuView(View):
             )
             return
 
-        msg = f"📰 **【ニュース追跡語】**（{len(keywords)}件）\n"
-        msg += "ニュースの絞り込みにのみ使われ、用語クイズには出題されません。\n\n"
+        msg = f"📰 **【ニュース追跡語】**（{len(keywords)}件）\n\n"
         msg += "、".join(keywords)
         await interaction.response.send_message(
             msg, view=NewsKeywordRemoveView(keywords), ephemeral=True
         )
-
-    @discord.ui.button(label="🎲 用語クイズ", style=discord.ButtonStyle.secondary, row=0)
-    async def quiz_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        quiz_msg, term = study_logic.get_kiso_quiz()
-        # 出題できた場合のみ、自己採点ボタン付きで返す
-        view = QuizReviewView(term) if term else None
-        await interaction.response.send_message(quiz_msg, view=view, ephemeral=True)
-
-
-class QuizReviewView(View):
-    """用語クイズの自己採点View
-
-    押された結果に応じて次回の出題日を更新し（間隔反復）、
-    連続で押せてしまわないようボタンを閉じます。
-    """
-    def __init__(self, term):
-        super().__init__(timeout=300)
-        self.term = term
-
-    async def _review(self, interaction: discord.Interaction, remembered):
-        result_msg = study_logic.review_term(self.term, remembered)
-        self.stop()
-        await interaction.response.edit_message(content=result_msg, view=None)
-
-    @discord.ui.button(label="✅ 覚えた", style=discord.ButtonStyle.success)
-    async def remembered_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._review(interaction, True)
-
-    @discord.ui.button(label="❌ あやふや", style=discord.ButtonStyle.danger)
-    async def forgot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._review(interaction, False)
 
 
 class ExamMenuView(View):
@@ -840,9 +799,9 @@ class MainMenuView(View):
     async def study_status_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=StudyStatusMenuView(), ephemeral=True)
 
-    @discord.ui.button(label="📚 学習・用語", style=discord.ButtonStyle.secondary, row=0)
-    async def glossary_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("メニューを選んでください：", view=GlossaryMenuView(), ephemeral=True)
+    @discord.ui.button(label="📰 ニュース用語", style=discord.ButtonStyle.secondary, row=0)
+    async def news_terms_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=NewsTermsMenuView(), ephemeral=True)
 
     @discord.ui.button(label="📝 資格学習", style=discord.ButtonStyle.primary, row=1)
     async def exam_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -907,11 +866,7 @@ class TaskDropdownCombined(Select):
 
 
 class UnknownTermSelectView(View):
-    """ニュースから検出した未登録語を、ニュース追跡語として登録するView
-
-    ここで登録した語はニュースの照合にのみ使われ、SRSクイズには出題されません
-    （トレンド語や製品名が試験対策のクイズに混ざるのを避けるため）。
-    """
+    """ニュースから検出した未登録語を、ニュース追跡語として登録するView"""
     def __init__(self, terms):
         super().__init__(timeout=120)
 
@@ -943,10 +898,6 @@ class UnknownTermDropdown(Select):
             lines.append("📰 ニュース追跡語に登録しました: " + "、".join(added))
         if skipped:
             lines.append("（登録済みのためスキップ: " + "、".join(skipped) + "）")
-        lines.append("")
-        lines.append("これらはニュースの絞り込みにのみ使われ、用語クイズには出題されません。")
-        lines.append("試験対策として覚えたい場合は「➕ 用語ストック」から解説付きで登録してください。")
-
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
@@ -971,23 +922,6 @@ class NewsKeywordRemoveDropdown(Select):
         removed = news_logic.remove_news_keywords(self.values)
         msg = "🗑️ 削除しました: " + "、".join(removed) if removed else "削除対象が見つかりませんでした。"
         await interaction.response.send_message(msg, ephemeral=True)
-
-
-class KisoAddModal(discord.ui.Modal, title='気になる用語のストック'):
-    term = discord.ui.TextInput(label='気になる用語・技術名', placeholder='例: エッジAI, クライアントサイドレンダリング', required=True)
-    desc = discord.ui.TextInput(label='簡単なメモ（概要や解説文）', style=discord.TextStyle.paragraph, placeholder='例: 技術の概要、特徴など客観的な文章。', required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        result = study_logic.add_kiso(self.term.value, self.desc.value)
-        await interaction.response.send_message(result, ephemeral=True)
-
-
-class SearchWordModal(discord.ui.Modal, title='ストック用語の検索'):
-    keyword = discord.ui.TextInput(label='検索したいキーワード', placeholder='例: エッジAI', required=True)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        result_msg = study_logic.search_glossary(self.keyword.value)
-        await interaction.response.send_message(result_msg, ephemeral=True)
 
 
 class WorkReportView(View):
@@ -1209,12 +1143,6 @@ async def done_command(interaction: discord.Interaction, task: str):
     await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
     if public_msg:
         await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-@tree.command(name="search", description="ストックした用語を検索します")
-@app_commands.describe(keyword="検索したいキーワード")
-async def search_command(interaction: discord.Interaction, keyword: str):
-    await interaction.response.send_message(study_logic.search_glossary(keyword), ephemeral=True)
 
 
 # ====================================================

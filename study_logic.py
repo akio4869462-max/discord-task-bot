@@ -2,19 +2,20 @@
 
 ユーザーの作業時間（ライフログ）を経験値（EXP）に換算し、レベルアップ、
 スキル称号の動的決定、および累積時間に応じた課題ボスバトル等のゲーム要素を制御します。
-ストックした用語からの試験用語クイズなどの学習支援ロジックも統合しています。
+
+⭕ 以前は用語集のストック・検索・SRSクイズ機能も統合していましたが、
+   使われていなかったため削除しました（過去問演習からのEXP自動連携で代替）。
+   ニュースの既知語フィルタ・追跡語管理は news_logic.py 側に残っています。
 """
 
 import json
 import os
-import random
 from datetime import datetime, timedelta, timezone
 
 # ====================================================
 # ⚙️ システム定数・設定値
 # ====================================================
 PLAYER_DATA_FILE = os.path.join('data', 'player_data.json')
-GLOSSARY_FILE = os.path.join('data', 'glossary.json')
 
 JST = timezone(timedelta(hours=9))
 
@@ -22,9 +23,6 @@ JST = timezone(timedelta(hours=9))
 EXP_PER_MINUTE = 10         # 1分間の作業で獲得できる基礎経験値
 BOSS_DEFEAT_BONUS = 200    # ボス撃破時に獲得できるボーナス経験値
 EXP_BASE_UNIT = 100         # レベルアップ必要経験値の算出基準値
-
-# 間隔反復（SRS）の設定：正解を重ねるほど出題間隔を伸ばすが、この日数で頭打ちにする
-MAX_REVIEW_INTERVAL_DAYS = 30
 
 # 【ボスバトルの定義】
 # 累積の「作業時間（分）」に応じて出現する課題ボスのリスト
@@ -66,10 +64,6 @@ BADGE_DEFINITIONS = [
 ]
 
 
-# ====================================================
-# 1. クイズ・用語集関連のロジック
-# ====================================================
-
 def _load_json(path, default):
     """指定したJSONファイルを読み込みます。存在しない・壊れている場合はdefaultを返します。"""
     if not os.path.exists(path):
@@ -82,228 +76,8 @@ def _load_json(path, default):
         return default
 
 
-def load_glossary():
-    """用語集を読み込み、全エントリを新形式（辞書）に正規化して返します。
-
-    旧形式（値が解説文の文字列のみ）で保存されたデータも、ここで自動的に
-    間隔反復用のフィールドを補完した新形式へ変換します。
-
-    Returns:
-        dict: {用語: {"desc", "next_review", "interval", "correct_count", "wrong_count"}}
-    """
-    raw = _load_json(GLOSSARY_FILE, {})
-    normalized = {}
-    for term, value in raw.items():
-        if isinstance(value, str):
-            # 旧形式：解説文だけが入っているので、復習情報を初期値で補完する
-            normalized[term] = {
-                "desc": value,
-                "next_review": None,   # Noneは「一度も復習していない＝いつでも出題可」を意味する
-                "interval": 0,
-                "correct_count": 0,
-                "wrong_count": 0,
-            }
-        else:
-            normalized[term] = {
-                "desc": value.get("desc", ""),
-                "next_review": value.get("next_review"),
-                "interval": value.get("interval", 0),
-                "correct_count": value.get("correct_count", 0),
-                "wrong_count": value.get("wrong_count", 0),
-            }
-    return normalized
-
-
-def save_glossary(glossary):
-    """用語集データをファイルへ保存します。
-
-    Returns:
-        bool: 保存に成功したかどうか。
-    """
-    try:
-        os.makedirs(os.path.dirname(GLOSSARY_FILE), exist_ok=True)
-        with open(GLOSSARY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(glossary, f, ensure_ascii=False, indent=4)
-        return True
-    except IOError as e:
-        print(f"⚠️ [ERROR] 用語集の保存に失敗しました: {e}")
-        return False
-
-
-def pick_quiz_term(today=None):
-    """出題する用語を1つ選びます。
-
-    復習期限（next_review）が到来している用語を優先し、無ければ全体からランダムに選びます。
-    これにより「忘れかけの用語ほど出やすい」状態を作ります。
-
-    Returns:
-        tuple: (用語, エントリdict, 復習期限が来ていたか) / 用語が無ければ (None, None, False)
-    """
-    glossary = load_glossary()
-    if not glossary:
-        return None, None, False
-
-    today_str = (today or datetime.now(JST).date()).strftime('%Y-%m-%d')
-
-    # next_reviewがNone（未復習）または期限到来のものを復習対象とする
-    due_terms = [
-        t for t, e in glossary.items()
-        if e['next_review'] is None or e['next_review'] <= today_str
-    ]
-
-    if due_terms:
-        chosen = random.choice(due_terms)
-        return chosen, glossary[chosen], True
-
-    chosen = random.choice(list(glossary.keys()))
-    return chosen, glossary[chosen], False
-
-
-def get_kiso_quiz(today=None):
-    """試験用語集から1問を抽出し、「説明文→用語を答える」形式のクイズを生成します。
-
-    応用情報の午前問題は説明文から用語を選ぶ形式が中心のため、本番と同じ向きで出題し、
-    答えとなる用語名をスポイラー（||）で隠します。
-
-    Returns:
-        tuple: (クイズ文, 出題した用語 または None)
-    """
-    term, entry, is_due = pick_quiz_term(today)
-    if term is None:
-        return "用語が登録されていません。先にメニューから用語をストックしてください。", None
-
-    header = "🔁 **【復習クイズ】**" if is_due else "🎲 **【ランダム出題】**"
-    msg = f"{header}\n次の説明にあてはまる用語は？\n\n> {entry['desc']}\n\n答え: ||{term}||"
-    return msg, term
-
-
-def review_term(term, remembered, today=None):
-    """クイズの自己採点結果を受けて、次回の復習日を更新します（間隔反復）。
-
-    覚えていた場合は出題間隔を約2倍に伸ばし、あやふやな場合は翌日に戻します。
-
-    Args:
-        term (str): 対象の用語。
-        remembered (bool): 覚えていたか（True: ✅覚えた / False: ❌あやふや）。
-        today (date, optional): 基準日（テスト用の注入口）。
-
-    Returns:
-        str: 次回復習日を案内するメッセージ。
-    """
-    glossary = load_glossary()
-    if term not in glossary:
-        return "その用語は見つかりませんでした。"
-
-    entry = glossary[term]
-    base_date = today or datetime.now(JST).date()
-
-    if remembered:
-        entry['correct_count'] += 1
-        # 初回は1日、以降は前回間隔の2倍（上限は30日）に伸ばす
-        entry['interval'] = min(max(entry['interval'] * 2, 1), MAX_REVIEW_INTERVAL_DAYS)
-        feedback = "✅ 覚えていましたね！"
-    else:
-        entry['wrong_count'] += 1
-        entry['interval'] = 1  # 翌日にもう一度出題する
-        feedback = "❌ 明日また出題します。解説を読み直しておきましょう。"
-
-    next_date = base_date + timedelta(days=entry['interval'])
-    entry['next_review'] = next_date.strftime('%Y-%m-%d')
-    save_glossary(glossary)
-
-    return f"{feedback}\n📅 次回の出題予定: {entry['next_review']}（{entry['interval']}日後）"
-
-
-def add_kiso(term, desc):
-    """新規のIT用語とその解説文を、用語集ファイル（glossary.json）に登録・永続化します。
-
-    Args:
-        term (str): 登録対象の用語名。
-        desc (str): 用語の解説・メモ内容。
-
-    Returns:
-        str: 登録処理結果を通知するチャット用メッセージ。
-    """
-    if not term or not desc:
-        return "用語と説明を両方入力してください。"
-
-    glossary = load_glossary()
-    if term in glossary:
-        # 既存用語は解説だけ更新し、復習の進捗はリセットしない
-        glossary[term]['desc'] = desc
-    else:
-        glossary[term] = {
-            "desc": desc,
-            "next_review": None,
-            "interval": 0,
-            "correct_count": 0,
-            "wrong_count": 0,
-        }
-
-    if save_glossary(glossary):
-        return f"✅ 用語「{term}」を登録しました！"
-    return "❌ 用語の保存処理中にエラーが発生しました。"
-
-
-def search_glossary(word):
-    """ユーザー指定のキーワードに基づき、用語集ファイルから部分一致による検索を実行します。
-
-    Args:
-        word (str): 検索用キーワード。
-
-    Returns:
-        str: 該当した用語の一覧メッセージ、またはヒットなしの通知メッセージ。
-    """
-    if not word:
-        return "検索するキーワードを入力してください。"
-
-    glossary = load_glossary()
-    if not glossary:
-        return "用語集がまだ作成されていません。"
-
-    matched = []
-    for term, entry in glossary.items():
-        # 大文字小文字を区別せずに部分一致検索
-        if word.lower() in term.lower():
-            matched.append(f"• **{term}**: {entry['desc']}")
-
-    if not matched:
-        return f"🔍 「{word}」に一致する用語は見つかりませんでした。"
-
-    return "🔍 **検索結果:**\n" + "\n".join(matched)
-
-
-def get_glossary_list(today=None):
-    """ストック用語の一覧を、復習状況（定着度）つきで取得します。
-
-    Returns:
-        str: 箇条書き形式で整形された登録用語一覧のメッセージ。
-    """
-    glossary = load_glossary()
-    if not glossary:
-        return "現在、ストックされている用語はありません。"
-
-    today_str = (today or datetime.now(JST).date()).strftime('%Y-%m-%d')
-    due_count = sum(
-        1 for e in glossary.values()
-        if e['next_review'] is None or e['next_review'] <= today_str
-    )
-
-    list_msg = f"📚 **現在のストック用語一覧**（全{len(glossary)}件／復習待ち{due_count}件）\n"
-    for term, entry in glossary.items():
-        if entry['next_review'] is None:
-            status = "🆕 未出題"
-        elif entry['next_review'] <= today_str:
-            status = "🔁 復習待ち"
-        else:
-            status = f"✅ 次回 {entry['next_review']}"
-        list_msg += f"• {term} … {status}\n"
-
-    return list_msg
-
-
 # ====================================================
-# 2. RPG・ステータス管理関連のロジック
+# RPG・ステータス管理関連のロジック
 # ====================================================
 
 def load_player_data():

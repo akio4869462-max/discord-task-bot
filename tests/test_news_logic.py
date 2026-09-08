@@ -348,19 +348,17 @@ def test_stock_keywords_merges_both_stores(both_stores):
     assert news_logic.load_stock_keywords() == ["ゼロトラスト", "OpenAI"]
 
 
-def test_news_keywords_do_not_reach_the_quiz(both_stores, monkeypatch):
-    """今回の要点：ニュース追跡語はSRSクイズの出題対象に入らない"""
-    import study_logic
+def test_news_keywords_and_glossary_terms_both_feed_news_matching(both_stores):
+    """ニュース照合には、glossary.json（学習用語）とnews_keywords.json（追跡語）の両方が使われる。
 
-    monkeypatch.setattr(study_logic, "GLOSSARY_FILE", str(both_stores / "glossary.json"))
-    study_logic.add_kiso("ゼロトラスト", "信頼を前提としない設計")
+    ⭕ かつては「用語ストック＝SRSクイズの出題対象」で、追跡語がそこに混ざらないことを
+       検証するテストだったが、SRSクイズ機能自体を削除したため、ニュース照合における
+       2ストアの併用のみを検証する形に縮小した。
+    """
+    with open(news_logic.GLOSSARY_FILE, "w", encoding="utf-8") as f:
+        json.dump({"ゼロトラスト": {"desc": "信頼を前提としない設計"}}, f, ensure_ascii=False)
     news_logic.add_news_keywords(["OpenAI", "Excel"])
 
-    quiz_terms = set(study_logic.load_glossary().keys())
-    assert quiz_terms == {"ゼロトラスト"}
-    assert "OpenAI" not in quiz_terms
-
-    # 一方でニュース照合には両方が使われる
     assert set(news_logic.load_stock_keywords()) == {"ゼロトラスト", "OpenAI", "Excel"}
 
 

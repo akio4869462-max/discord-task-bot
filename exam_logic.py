@@ -95,7 +95,7 @@ def log_session(field, total, correct, now=None):
     elif rate >= WEAK_FIELD_THRESHOLD:
         msg += "👍 まずまずです。間違えた問題の復習をしておきましょう。"
     else:
-        msg += "💪 伸びしろのある分野です。解説をよく読んで、用語をストックしておきましょう。"
+        msg += "💪 伸びしろのある分野です。解説をよく読んで復習しておきましょう。"
 
     return msg
 

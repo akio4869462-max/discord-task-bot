@@ -27,8 +27,7 @@ RSS_FEEDS = [
 ]
 
 GLOSSARY_FILE = os.path.join('data', 'glossary.json')
-# ニュース追跡専用のキーワード。学習用語（glossary.json）と分けることで、
-# トレンド語や製品名がSRSクイズの出題対象に混ざらないようにしている。
+# ニュース追跡専用のキーワード。学習用語（glossary.json）とはファイルを分けている。
 NEWS_KEYWORDS_FILE = os.path.join('data', 'news_keywords.json')
 MAX_DISPLAY_ARTICLES = 5   # Discordに表示する最大記事数
 # 通知は読み流せる量に抑え、登録UIでは埋もれた語まで拾えるよう上限を分ける
@@ -84,8 +83,6 @@ def load_glossary_terms():
 
 def load_news_keywords():
     """ニュース追跡専用キーワードの一覧を読み込みます。
-
-    こちらに登録された語はニュースの照合にのみ使われ、SRSクイズには出題されません。
 
     Returns:
         list[str]: キーワードのリスト。
@@ -358,7 +355,7 @@ def build_unknown_terms_message(unknown_terms):
         return ""
 
     msg = "\n🆕 **【まだ用語集に無い頻出語】**\n"
-    msg += "気になるものは「📚 学習・用語」→「🆕 ニュースの新語」から追跡登録できます。\n"
+    msg += "気になるものは「📰 ニュース用語」→「🆕 ニュースの新語」から追跡登録できます。\n"
     for item in unknown_terms:
         count_label = f"（{item['count']}件）" if item['count'] > 1 else ""
         msg += f"・**{item['term']}**{count_label} … {item['title'][:50]}\n"
