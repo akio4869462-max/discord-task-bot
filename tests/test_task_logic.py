@@ -91,13 +91,17 @@ def test_complete_task_by_id_removes_correct_task():
     assert remaining[0]['task'] == '残すタスク'
 
 
-def test_complete_task_by_number_removes_correct_task():
-    task_logic.add_task('1番目')
+def test_complete_task_all_digit_id_is_still_matched_by_id(monkeypatch):
+    """タスクIDが偶然すべて数字（uuid4の8桁16進数では約2.3%の確率で起こりうる）でも、
+    番号として誤解釈されず、IDの完全一致で正しいタスクだけが完了することを保証する
+    （かつて番号扱いされ、別タスクを誤って完了させていたバグの回帰テスト）。"""
+    monkeypatch.setattr('uuid.uuid4', lambda: type('U', (), {'hex': '12345678abcd'})())
+    task_logic.add_task('1番目のふりをした用心棒')
     task_logic.add_task('2番目')
 
-    msg, category = task_logic.complete_task('1')
+    msg, category = task_logic.complete_task('12345678')
 
-    assert '1番目' in msg
+    assert '1番目のふりをした用心棒' in msg
     remaining = task_logic.load_data()
     assert len(remaining) == 1
     assert remaining[0]['task'] == '2番目'
@@ -109,10 +113,16 @@ def test_complete_task_unknown_id_returns_error():
     assert '見つかりませんでした' in msg
 
 
-def test_complete_task_out_of_range_number_returns_error():
-    msg, category = task_logic.complete_task('999')
+def test_complete_task_number_that_is_not_a_real_id_returns_error():
+    """番号ベースの選択は廃止済み。数字の文字列を渡しても、それがIDと一致しない限り
+    見つからない扱いになる（他のタスクを誤って完了させない）。"""
+    task_logic.add_task('先頭のタスク')
+
+    msg, category = task_logic.complete_task('1')
+
     assert category is None
-    assert '見つかりません' in msg
+    assert '見つかりませんでした' in msg
+    assert len(task_logic.load_data()) == 1
 
 
 def test_get_display_fields_returns_task_text_and_stars():

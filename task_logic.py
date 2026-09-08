@@ -181,25 +181,22 @@ def _finish_complete(removed):
 def complete_task(identifier):
     """タスクを完了（削除）します。
 
-    プルダウン選択時は一意なタスクID（英数字）、テキストコマンド（!done N）時は
-    表示上の番号（1始まり）を受け取ります。IDでの完全一致を優先することで、
-    一覧表示後にタスクが増減・並び替えされても、選んだつもりと別のタスクを
-    誤って完了させてしまう事故を防ぎます。
+    プルダウンやオートコンプリートから渡される、一意なタスクID（英数字8桁）の
+    完全一致でのみ特定します。一覧表示後にタスクが増減・並び替えされても、
+    選んだつもりと別のタスクを誤って完了させてしまう事故を防ぎます。
+
+    ⭕ 以前は「数字だけの文字列なら表示上の番号」とみなす分岐もありましたが、
+       タスクIDはuuid4由来の8桁16進数のため約2.3%の確率で偶然全桁数字になり得ます。
+       その場合にIDが番号として誤解釈され、別のタスクを完了させてしまう実バグが
+       あったため、ID完全一致のみに一本化しました（番号ベースの呼び出し元は
+       スラッシュコマンド全面移行により既に存在しません）。
     """
     todo_list = load_data()
 
-    if not identifier.isdigit():
-        for i, item in enumerate(todo_list):
-            if isinstance(item, dict) and item.get('id') == identifier:
-                removed = todo_list.pop(i)
-                save_data(todo_list)
-                return _finish_complete(removed)
-        return 'そのタスクは既に完了しているか、見つかりませんでした。', None
+    for i, item in enumerate(todo_list):
+        if isinstance(item, dict) and item.get('id') == identifier:
+            removed = todo_list.pop(i)
+            save_data(todo_list)
+            return _finish_complete(removed)
 
-    index = int(identifier) - 1
-    if 0 <= index < len(todo_list):
-        removed = todo_list.pop(index)
-        save_data(todo_list)
-        return _finish_complete(removed)
-    else:
-        return 'その番号のタスクは見つかりません。', None
+    return 'そのタスクは既に完了しているか、見つかりませんでした。', None
