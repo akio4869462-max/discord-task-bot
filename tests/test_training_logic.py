@@ -100,6 +100,20 @@ def test_log_measurement_records_value():
     assert len(data['measurements']) == 1
 
 
+@pytest.mark.parametrize('weight_kg,waist_cm', [
+    (6.0, 80.0),     # 桁の打ち間違い（60.0のつもり）
+    (400.0, 80.0),   # 上限超過
+    (60.0, 10.0),    # 桁の打ち間違い（100.0のつもり）
+    (60.0, 300.0),   # 上限超過
+])
+def test_log_measurement_rejects_implausible_values(weight_kg, waist_cm):
+    """明らかな桁間違いを防ぐための緩い範囲チェック。他の計測系（typing_logic）と
+    同様、記録前に妥当性を検証する（以前はここに一切チェックが無かった）。"""
+    msg = tl.log_measurement(weight_kg, waist_cm, now=TUESDAY)
+    assert msg.startswith('❌')
+    assert tl.load_training_data()['measurements'] == []
+
+
 def test_log_measurement_shows_diff_from_previous():
     tl.log_measurement(60.0, 80.0, now=TUESDAY)
     msg = tl.log_measurement(59.0, 78.5, now=TUESDAY + timedelta(days=7))

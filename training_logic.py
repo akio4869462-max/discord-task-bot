@@ -237,6 +237,12 @@ def log_session(note=None, now=None):
     return msg, streak
 
 
+# 明らかな入力ミス（桁の打ち間違い等）だけを弾くための緩い範囲。
+# 実際の値域を厳密に制限する意図はない。
+WEIGHT_RANGE_KG = (20, 300)
+WAIST_RANGE_CM = (30, 250)
+
+
 def log_measurement(weight_kg, waist_cm, now=None):
     """体重・お腹周りを記録します。
 
@@ -246,8 +252,14 @@ def log_measurement(weight_kg, waist_cm, now=None):
         now (datetime, optional): 基準日時（省略時は現在時刻。テスト用の注入口）。
 
     Returns:
-        str: 記録完了メッセージ（前回記録との差分があれば併記）。
+        str: 記録完了メッセージ（前回記録との差分があれば併記）。入力が明らかに
+             異常な範囲の場合はその旨のエラーメッセージ。
     """
+    if not (WEIGHT_RANGE_KG[0] <= weight_kg <= WEIGHT_RANGE_KG[1]):
+        return f"❌ 体重は{WEIGHT_RANGE_KG[0]}〜{WEIGHT_RANGE_KG[1]}kgの範囲で入力してください（桁の打ち間違いを防ぐための緩いチェックです）。"
+    if not (WAIST_RANGE_CM[0] <= waist_cm <= WAIST_RANGE_CM[1]):
+        return f"❌ お腹周りは{WAIST_RANGE_CM[0]}〜{WAIST_RANGE_CM[1]}cmの範囲で入力してください（桁の打ち間違いを防ぐための緩いチェックです）。"
+
     data = load_training_data()
     today_str = (now or datetime.now(JST)).strftime('%Y-%m-%d')
 
