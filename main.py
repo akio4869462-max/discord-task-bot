@@ -532,6 +532,53 @@ class ExamMenuView(View):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
 
 
+class TrainingMenuView(View):
+    """「トレーニング」サブメニュー：今日のメニュー・記録・体組成の記録/履歴をまとめたView
+
+    他の全機能がボタンから辿れるのに対し、トレーニングだけ/trainingスラッシュコマンドの
+    みだった対応漏れを埋める。ロジック側の関数はスラッシュコマンド版と共通利用する。
+    """
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="💪 今日のメニュー", style=discord.ButtonStyle.success, row=0)
+    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        image_paths = training_logic.get_today_menu_image_paths()
+        files = [discord.File(p) for p in image_paths] if image_paths else None
+        await interaction.response.send_message(training_logic.get_today_menu(), files=files, ephemeral=True)
+
+    @discord.ui.button(label="✅ 完了を記録", style=discord.ButtonStyle.primary, row=0)
+    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        msg, streak = training_logic.log_session()
+        await interaction.response.send_message(msg, ephemeral=True)
+        if streak in training_logic.TRAINING_STREAK_MILESTONES:
+            await interaction.channel.send(f"{interaction.user.mention} 🔥 筋トレ{streak}日連続達成！")
+
+    @discord.ui.button(label="📏 体組成を記録", style=discord.ButtonStyle.secondary, row=1)
+    async def measure_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TrainingMeasureModal())
+
+    @discord.ui.button(label="📈 体組成の履歴", style=discord.ButtonStyle.secondary, row=1)
+    async def history_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(training_logic.get_measurement_history(), ephemeral=True)
+
+
+class TrainingMeasureModal(discord.ui.Modal, title='📏 体組成の記録'):
+    """体重・お腹周りの入力モーダル（/training measureのボタン版）"""
+    weight_input = discord.ui.TextInput(label='体重(kg)', placeholder='例: 65.5', required=True, max_length=6)
+    waist_input = discord.ui.TextInput(label='お腹周り(cm)', placeholder='例: 82.0', required=True, max_length=6)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        weight_kg = parse_float(self.weight_input.value)
+        waist_cm = parse_float(self.waist_input.value)
+        if weight_kg is None or waist_cm is None:
+            await interaction.response.send_message("体重・お腹周りは数字で入力してください！", ephemeral=True)
+            return
+
+        msg = training_logic.log_measurement(weight_kg, waist_cm)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+
 class DailyLogView(View):
     """定期通知にそのまま添えて、ワンタップで実施を記録するためのView
 
@@ -769,6 +816,10 @@ class MainMenuView(View):
     @discord.ui.button(label="⌨️ タイピング", style=discord.ButtonStyle.primary, row=1)
     async def typing_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=TypingMenuView(), ephemeral=True)
+
+    @discord.ui.button(label="🏋️ トレーニング", style=discord.ButtonStyle.primary, row=1)
+    async def training_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=TrainingMenuView(), ephemeral=True)
 
     @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=1)
     async def utility_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
