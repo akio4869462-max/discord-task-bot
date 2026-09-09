@@ -216,4 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-data/
+
+# Botのランタイムデータ（EC2ではホスト側にバインドマウントしている）。
+# ⭕ 先頭の / でルート直下だけを対象にする。無いと race_sim/data/ のような
+#    ソース資産まで巻き込む（較正データがコミットされず実際に起きた）。
+/data/
