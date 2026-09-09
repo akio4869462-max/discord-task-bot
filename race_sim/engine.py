@@ -77,6 +77,20 @@ STYLE_PACE = {'逃げ': 1.06, '先行': 1.02, '差し': 0.97, '追込': 0.93}
 # ペースが速い/遅いときに脚質が受ける恩恵（zスコア）。ハイペースなら差し・追込が有利。
 STYLE_PACE_SENSITIVITY = {'逃げ': -0.55, '先行': -0.20, '差し': 0.25, '追込': 0.45}
 
+# 脚質ごとの区間配分の形。(全体の傾き, ゴールに向かうほどの傾き)。
+# 値が小さい区間ほど速く走る。逃げは前半が速く終いがかかり、追込はその逆。
+STYLE_SHAPE = {
+    '逃げ': (-0.045, 0.130),
+    '先行': (-0.030, 0.075),
+    '差し': (0.030, -0.075),
+    '追込': (0.055, -0.130),
+}
+# 脚質による差の強さ。芝ダで分ける。
+# ⭕ 1.0（素の値）だと、レース内の上がり3Fのばらつきが芝でSD1.24（実測0.856）まで
+#    広がり、後方の馬が非現実的な差し切りを見せた。ダートは実際にばらつきが大きい
+#    （実測SD1.13）ので芝より強めに残す。
+STYLE_SHAPE_SCALE = {'芝': 0.70, 'ダ': 0.88}
+
 CLASS_ORDER = ('未勝利', '1勝', '2勝', '3勝', 'OP', 'G3', 'G2', 'G1')
 
 # クラスごとの出走馬の平均能力z と、同一クラス内でのばらつき。
@@ -207,22 +221,16 @@ def race_pace(entries):
 # ====================================================
 # 区間ラップの生成
 # ====================================================
-def _section_template(style, n_sections, pace):
+def _section_template(style, n_sections, pace, shape_scale=0.70):
     """脚質ごとの「どの区間にどれだけ時間を使うか」の重み配分を作る。
 
     重みが小さい区間ほど速く走る。合計が n_sections になるよう正規化して返す。
     """
+    shape = STYLE_SHAPE.get(style, STYLE_SHAPE['差し'])
     weights = []
     for i in range(n_sections):
         pos = i / max(1, n_sections - 1)      # 0.0=スタート直後, 1.0=ゴール前
-        if style == '逃げ':
-            w = 0.955 + 0.13 * pos
-        elif style == '先行':
-            w = 0.970 + 0.075 * pos
-        elif style == '差し':
-            w = 1.030 - 0.075 * pos
-        else:  # 追込
-            w = 1.055 - 0.130 * pos
+        w = 1.0 + shape_scale * (shape[0] + shape[1] * pos)
         # スタート直後の1ハロンは加速に使うぶん必ず遅い
         if i == 0:
             w += 0.085
@@ -234,13 +242,13 @@ def _section_template(style, n_sections, pace):
     return [w * n_sections / total for w in weights]
 
 
-def _splits_for(total_time, style, distance, pace, dash_z, rng=None):
+def _splits_for(total_time, style, distance, pace, dash_z, rng=None, shape_scale=0.70):
     """1頭ぶんの200m区間ラップを作る。合計は必ず total_time に一致する。
 
     上がり3Fの水準合わせは、全馬の配分が出そろってから _anchor_last3f で行う。
     """
     n_sections = max(1, int(round(distance / 200.0)))
-    tmpl = _section_template(style, n_sections, pace)
+    tmpl = _section_template(style, n_sections, pace, shape_scale)
 
     # 瞬発力は終いの3ハロンを速くし、そのぶん道中で帳尻を合わせる
     if n_sections >= 4:
@@ -366,6 +374,7 @@ def simulate(race, entries, seed=None, baseline=None):
     baseline = baseline or load_baseline()
 
     t_base = base_time(race, baseline) + rng.gauss(0.0, RACE_NOISE_SD)
+    shape_scale = STYLE_SHAPE_SCALE.get(race['surface'], 0.70)
     pace = race_pace(entries)
     dist_scale = race['distance'] / 1600.0
 
@@ -397,7 +406,7 @@ def simulate(race, entries, seed=None, baseline=None):
 
     all_splits = [
         _splits_for(r['time'], r['entry'].get('style', '先行'), race['distance'], pace,
-                    r['dash_z'], rng=rng)
+                    r['dash_z'], rng=rng, shape_scale=shape_scale)
         for r in results
     ]
 

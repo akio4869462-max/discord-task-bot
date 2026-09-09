@@ -1,0 +1,541 @@
+<title>レース再生</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f6f7f4;
+    --surface: #fffffe;
+    --ink: #15201a;
+    --ink-2: #3d4c44;
+    --ink-3: #6b7a71;
+    --rule: #d8ded8;
+    --rule-strong: #b6c0b8;
+    --turf: #2f6b4f;
+    --turf-soft: #e4ede7;
+    --silk: #b83a26;
+    --gold: #9a7418;
+    --track-turf: #4a8b5f;
+    --track-turf-2: #43804f;
+    --track-dirt: #a98a63;
+    --track-dirt-2: #9d7d57;
+    --rail: #f4f6f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #121714;
+      --surface: #1a211d;
+      --ink: #e8ede9;
+      --ink-2: #b3c0b8;
+      --ink-3: #849089;
+      --rule: #2c3630;
+      --rule-strong: #465049;
+      --turf: #6cb891;
+      --turf-soft: #1f2f27;
+      --silk: #e8836e;
+      --gold: #d1a94a;
+      --track-turf: #2f5b3f;
+      --track-turf-2: #2a5238;
+      --track-dirt: #6b573e;
+      --track-dirt-2: #614e37;
+      --rail: #d6ddd4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121714;
+    --surface: #1a211d;
+    --ink: #e8ede9;
+    --ink-2: #b3c0b8;
+    --ink-3: #849089;
+    --rule: #2c3630;
+    --rule-strong: #465049;
+    --turf: #6cb891;
+    --turf-soft: #1f2f27;
+    --silk: #e8836e;
+    --gold: #d1a94a;
+    --track-turf: #2f5b3f;
+    --track-turf-2: #2a5238;
+    --track-dirt: #6b573e;
+    --track-dirt-2: #614e37;
+    --rail: #d6ddd4;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  header { margin-bottom: 18px; }
+  .race-title {
+    font-family: "Shippori Mincho B1", "Yu Mincho", serif;
+    font-size: clamp(22px, 4vw, 30px); font-weight: 700; margin: 0 0 6px;
+    letter-spacing: .02em;
+  }
+  .race-meta {
+    display: flex; flex-wrap: wrap; gap: 4px 18px;
+    font-family: "Roboto Mono", monospace; font-size: 12.5px; color: var(--ink-3);
+  }
+  .race-meta b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---- 走路 ---- */
+  .stage { position: relative; border: 1px solid var(--rule-strong); background: var(--surface); }
+  canvas { display: block; width: 100%; height: auto; }
+  /* ⭕ ペースと残り距離はキャンバスに直接描く。HTMLで重ねていたときは走路の外の
+     白地に白文字が乗り、まったく見えなかった。 */
+  /* ---- 操作 ---- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--rule);
+  }
+  button {
+    font: inherit; font-size: 13.5px; padding: 6px 14px; cursor: pointer;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--rule-strong); border-radius: 2px;
+  }
+  button:hover { border-color: var(--turf); }
+  button:focus-visible { outline: 2px solid var(--turf); outline-offset: 2px; }
+  button.primary { background: var(--turf); color: var(--paper); border-color: var(--turf); font-weight: 500; min-width: 92px; }
+  .speeds { display: flex; gap: 0; margin-left: auto; }
+  .speeds button { border-radius: 0; margin-left: -1px; min-width: 48px; }
+  .speeds button[aria-pressed="true"] { background: var(--turf-soft); border-color: var(--turf); color: var(--turf); font-weight: 700; }
+  input[type=range] { flex: 1 1 180px; min-width: 140px; accent-color: var(--turf); }
+  .clock { font-family: "Roboto Mono", monospace; font-size: 13px; color: var(--ink-2); min-width: 62px; }
+
+  /* ---- 実況の並び ---- */
+  .board { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; margin-top: 16px; }
+  @media (max-width: 640px) { .board { grid-template-columns: 1fr; } }
+  .board h3 {
+    font-size: 11px; font-family: "Roboto Mono", monospace; letter-spacing: .12em;
+    color: var(--ink-3); font-weight: 400; margin: 0 0 8px; text-transform: uppercase;
+  }
+  ol.order { list-style: none; margin: 0; padding: 0; }
+  ol.order li {
+    display: grid; grid-template-columns: 22px 26px 1fr auto; gap: 8px; align-items: center;
+    padding: 3px 0; border-bottom: 1px solid var(--rule);
+    font-size: 13.5px;
+  }
+  ol.order li:last-child { border-bottom: none; }
+  .pos { font-family: "Roboto Mono", monospace; color: var(--ink-3); font-size: 12px; text-align: right; }
+  .silk {
+    width: 22px; height: 18px; border-radius: 2px; display: grid; place-items: center;
+    font-family: "Roboto Mono", monospace; font-size: 11px; font-weight: 500;
+    border: 1px solid rgba(0,0,0,.35);
+  }
+  .hname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li.mine .hname { font-weight: 700; color: var(--silk); }
+  .gap-m { font-family: "Roboto Mono", monospace; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  /* ---- 結果 ---- */
+  .result-head { display: flex; align-items: baseline; gap: 14px; margin-top: 30px; }
+  .result-head h3 { margin: 0; font-family: "Shippori Mincho B1", serif; font-size: 18px; }
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  thead th {
+    font-family: "Roboto Mono", monospace; font-size: 10.5px; letter-spacing: .08em;
+    color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--rule-strong);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  .num { font-family: "Roboto Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; }
+  tr.win td { background: var(--turf-soft); font-weight: 700; }
+  tr.mine td { color: var(--silk); }
+  footer {
+    margin-top: 28px; font-family: "Roboto Mono", monospace;
+    font-size: 11.5px; color: var(--ink-3);
+  }
+</style>
+
+<script id="race-data" type="application/json">
+{"race": {"name": "デモレース", "course": "東京", "surface": "芝", "distance": 1600, "cond": "良", "class": "2勝"}, "pace": 0.0, "base_time": 94.0, "horses": [{"no": 1, "name": "サンプルホース", "style": "逃げ", "is_player": false, "finish": 1, "time": 94.0, "margin": 0.0, "last3f": 34.5, "splits": [12.6, 11.2, 11.5, 11.8, 12.0, 11.6, 11.5, 11.8], "passing": [1, 1, 1, 1], "trouble": null}]}
+</script>
+
+<div class="wrap">
+  <header>
+    <h1 class="race-title" id="title">レース</h1>
+    <div class="race-meta" id="meta"></div>
+  </header>
+
+  <div class="stage">
+    <canvas id="track" width="1720" height="660"></canvas>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="play">▶ スタート</button>
+    <button id="restart">最初から</button>
+    <span class="clock" id="clock">0.0s</span>
+    <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="再生位置">
+    <span class="speeds" role="group" aria-label="再生速度">
+      <button data-speed="0.5">×0.5</button>
+      <button data-speed="1" aria-pressed="true">×1</button>
+      <button data-speed="2">×2</button>
+    </span>
+  </div>
+
+  <div class="board">
+    <div>
+      <h3>現在の隊列</h3>
+      <ol class="order" id="order"></ol>
+    </div>
+    <div>
+      <h3>出走表</h3>
+      <ol class="order" id="card"></ol>
+    </div>
+  </div>
+
+  <div class="result-head">
+    <h3>結果</h3>
+    <button id="reveal">結果を表示</button>
+  </div>
+  <div class="scroller" id="result-wrap" hidden>
+    <table>
+      <thead>
+        <tr><th>着</th><th>馬番</th><th>馬名</th><th class="num">タイム</th><th class="num">着差</th>
+            <th class="num">上り3F</th><th>通過</th><th>脚質</th></tr>
+      </thead>
+      <tbody id="result-body"></tbody>
+    </table>
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const DATA = JSON.parse(document.getElementById('race-data').textContent);
+  const RACE = DATA.race;
+  const HORSES = DATA.horses.slice().sort((a, b) => a.no - b.no);
+  const N = HORSES.length;
+  const DISTANCE = RACE.distance;
+
+  // JRAの枠番の色。馬番と頭数から枠を決める。
+  // ⭕ 枠は均等割りで、余りは外枠（大きい番号）から1頭ずつ足す。16頭なら各枠2頭、
+  //    18頭なら7枠と8枠だけ3頭になる。
+  const WAKU_COLORS = [
+    { bg: '#ffffff', fg: '#1a1a1a' }, { bg: '#1c1c1c', fg: '#ffffff' },
+    { bg: '#d8402f', fg: '#ffffff' }, { bg: '#2f6cc4', fg: '#ffffff' },
+    { bg: '#f0c419', fg: '#1a1a1a' }, { bg: '#2f9e5e', fg: '#ffffff' },
+    { bg: '#f07f2f', fg: '#1a1a1a' }, { bg: '#f2a3bd', fg: '#1a1a1a' }
+  ];
+
+  function wakuOf(no, fieldSize) {
+    const counts = new Array(8).fill(Math.floor(fieldSize / 8));
+    for (let i = 0; i < fieldSize % 8; i++) counts[7 - i] += 1;
+    let seen = 0;
+    for (let w = 0; w < 8; w++) {
+      seen += counts[w];
+      if (no <= seen) return w;
+    }
+    return 7;
+  }
+
+  // 区間タイムの累積。ある時刻にどこを走っているかを引くために使う。
+  HORSES.forEach(function (h) {
+    const cum = [];
+    let acc = 0;
+    h.splits.forEach(function (s) { acc += s; cum.push(acc); });
+    h.cum = cum;
+    h.sectionLen = DISTANCE / h.splits.length;
+    h.waku = wakuOf(h.no, N);
+    h.color = WAKU_COLORS[h.waku];
+  });
+
+  const MAX_TIME = Math.max.apply(null, HORSES.map(function (h) { return h.time; }));
+  const PACE_LABEL = DATA.pace > 0.15 ? 'ハイペース' : (DATA.pace < -0.15 ? 'スローペース' : '平均ペース');
+
+  /** その時刻に何メートル地点を走っているか。区間の中は等速とみなして補間する。 */
+  function distanceAt(h, t) {
+    if (t >= h.time) return DISTANCE;
+    let i = 0;
+    while (i < h.cum.length && h.cum[i] <= t) i++;
+    const prev = i === 0 ? 0 : h.cum[i - 1];
+    const split = h.splits[i];
+    const within = split > 0 ? (t - prev) / split : 0;
+    return Math.min(DISTANCE, (i + within) * h.sectionLen);
+  }
+
+  // ---- 描画 ----
+  const canvas = document.getElementById('track');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  // ⭕ 走路をキャンバスのほぼ全面に取る。上に余白を作って距離ラベルやHUDを置いたときは、
+  //    白地に白文字で何も見えなかった。文字はすべて緑（走路）の上に置く。
+  const TRACK_TOP = 58, TRACK_BOTTOM = H - 104;
+  const LANE_H = (TRACK_BOTTOM - TRACK_TOP - 30) / N;
+  const R = Math.max(8, Math.min(15, LANE_H / 2 - 2));   // 馬が縦に重ならない大きさ
+
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function drawTrack(camStart, mPerPx) {
+    const isDirt = RACE.surface === 'ダ';
+    ctx.fillStyle = cssVar(isDirt ? '--track-dirt' : '--track-turf');
+    ctx.fillRect(0, TRACK_TOP, W, TRACK_BOTTOM - TRACK_TOP);
+
+    // 芝目／ならしの縞。走っている感じを出すために地面側を動かす。
+    ctx.fillStyle = cssVar(isDirt ? '--track-dirt-2' : '--track-turf-2');
+    const stripe = 24 / mPerPx;
+    const offset = (camStart / 24 % 1) * stripe;
+    for (let x = -offset; x < W; x += stripe * 2) {
+      ctx.fillRect(x, TRACK_TOP, stripe, TRACK_BOTTOM - TRACK_TOP);
+    }
+
+    // ラチ
+    ctx.fillStyle = cssVar('--rail');
+    ctx.fillRect(0, TRACK_TOP - 6, W, 6);
+    ctx.fillRect(0, TRACK_BOTTOM, W, 6);
+
+    // 200mごとのハロン棒と残り距離。ラベルは走路の中に置く。
+    ctx.font = '500 21px "Roboto Mono", monospace';
+    ctx.textAlign = 'center';
+    for (let d = 0; d <= DISTANCE; d += 200) {
+      const x = (d - camStart) / mPerPx;
+      if (x < -80 || x > W + 80) continue;
+      const remain = DISTANCE - d;
+      ctx.fillStyle = 'rgba(255,255,255,.28)';
+      ctx.fillRect(x - 1.5, TRACK_TOP, 3, TRACK_BOTTOM - TRACK_TOP);
+      ctx.fillStyle = 'rgba(255,255,255,.80)';
+      ctx.fillText(remain === 0 ? 'ゴール' : remain + 'm', x, TRACK_TOP + 26);
+    }
+
+    // スタート地点のゲート
+    const sx = (0 - camStart) / mPerPx;
+    if (sx > -30 && sx < W + 30) {
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.fillRect(sx - 2, TRACK_TOP, 4, TRACK_BOTTOM - TRACK_TOP);
+    }
+
+    // ゴール板
+    const gx = (DISTANCE - camStart) / mPerPx;
+    if (gx > -40 && gx < W + 40) {
+      ctx.fillStyle = '#e02b1d';
+      ctx.fillRect(gx - 3, TRACK_TOP - 6, 6, TRACK_BOTTOM - TRACK_TOP + 12);
+    }
+  }
+
+  function drawHorses(camStart, mPerPx, t) {
+    HORSES.forEach(function (h, i) {
+      const d = distanceAt(h, t);
+      const x = (d - camStart) / mPerPx;
+      const y = TRACK_TOP + 38 + LANE_H * (i + 0.5);
+
+      // 影
+      ctx.beginPath();
+      ctx.ellipse(x - 2, y + R * 0.8, R, R / 3, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,.22)';
+      ctx.fill();
+
+      if (h.is_player) {
+        ctx.beginPath();
+        ctx.arc(x, y, R + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffd45e';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, R, 0, Math.PI * 2);
+      ctx.fillStyle = h.color.bg;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = h.color.fg;
+      ctx.font = '700 ' + Math.round(R * 1.15) + 'px "Roboto Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(h.no), x, y + 1);
+      ctx.textBaseline = 'alphabetic';
+
+      // 名前は先頭数頭と自分の馬だけ。全部出すと読めない。
+      if (h.is_player || h.currentPos <= 3) {
+        ctx.font = '500 18px "Zen Kaku Gothic New", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(0,0,0,.4)';
+        ctx.fillText(h.name, x + R + 9, y + 7);
+        ctx.fillStyle = h.is_player ? '#ffe08a' : '#ffffff';
+        ctx.fillText(h.name, x + R + 8, y + 6);
+      }
+    });
+  }
+
+  function drawMiniMap(t) {
+    const y = H - 58, left = 40, right = W - 40;
+    ctx.fillStyle = cssVar('--rule');
+    ctx.fillRect(left, y, right - left, 6);
+    ctx.fillStyle = cssVar('--rule-strong');
+    for (let d = 0; d <= DISTANCE; d += 400) {
+      const x = left + (right - left) * (d / DISTANCE);
+      ctx.fillRect(x - 1, y - 5, 2, 16);
+    }
+    HORSES.forEach(function (h) {
+      const x = left + (right - left) * (distanceAt(h, t) / DISTANCE);
+      ctx.beginPath();
+      ctx.arc(x, y + 3, h.is_player ? 6 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = h.is_player ? '#e0902b' : cssVar('--turf');
+      ctx.fill();
+    });
+  }
+
+  function drawHud(remain) {
+    const y = TRACK_BOTTOM - 18;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.75)';
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.font = '500 22px "Roboto Mono", monospace';
+    ctx.fillText(PACE_LABEL, 26, y);
+    ctx.textAlign = 'right';
+    ctx.font = '700 30px "Roboto Mono", monospace';
+    ctx.fillText(remain <= 0 ? 'ゴール' : '残り ' + Math.round(remain) + 'm', W - 26, y);
+    ctx.restore();
+  }
+
+  function render(t) {
+    const positions = HORSES.map(function (h) { return distanceAt(h, t); });
+    const lead = Math.max.apply(null, positions);
+    const tail = Math.min.apply(null, positions);
+
+    // 隊列がちょうど収まる倍率。開いても縮んでも見失わないように幅を決める。
+    const spread = Math.max(45, (lead - tail) * 1.5);
+    const mPerPx = spread / (W * 0.62);
+    const camStart = lead - W * 0.72 * mPerPx;
+
+    // 現在の順位（描画で名前を出すかの判定に使う）
+    const ranked = HORSES.map(function (h, i) { return { h: h, d: positions[i] }; })
+      .sort(function (a, b) { return b.d - a.d; });
+    ranked.forEach(function (r, i) { r.h.currentPos = i + 1; });
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = cssVar('--surface');
+    ctx.fillRect(0, 0, W, H);
+    drawTrack(camStart, mPerPx);
+    drawHorses(camStart, mPerPx, t);
+    drawMiniMap(t);
+
+    const remain = Math.max(0, DISTANCE - lead);
+    drawHud(remain);
+
+    updateBoard(ranked, t);
+    document.getElementById('clock').textContent = t.toFixed(1) + 's';
+  }
+
+  // ---- 隊列の表示 ----
+  const orderEl = document.getElementById('order');
+  function updateBoard(ranked, t) {
+    const leadD = ranked[0].d;
+    orderEl.innerHTML = ranked.map(function (r, i) {
+      const h = r.h;
+      const behind = leadD - r.d;
+      const gap = t >= MAX_TIME
+        ? (h.margin === 0 ? '—' : '+' + h.margin.toFixed(1))
+        : (behind < 0.5 ? '先頭' : '-' + behind.toFixed(1) + 'm');
+      return '<li class="' + (h.is_player ? 'mine' : '') + '">'
+        + '<span class="pos">' + (i + 1) + '</span>'
+        + '<span class="silk" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>'
+        + '<span class="hname">' + h.name + '</span>'
+        + '<span class="gap-m">' + gap + '</span></li>';
+    }).join('');
+  }
+
+  // ---- 出走表 ----
+  document.getElementById('card').innerHTML = HORSES.map(function (h) {
+    return '<li class="' + (h.is_player ? 'mine' : '') + '">'
+      + '<span class="pos">' + (h.waku + 1) + '枠</span>'
+      + '<span class="silk" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>'
+      + '<span class="hname">' + h.name + '</span>'
+      + '<span class="gap-m">' + h.style + '</span></li>';
+  }).join('');
+
+  // ---- 見出し ----
+  document.getElementById('title').textContent = RACE.name || 'レース';
+  document.getElementById('meta').innerHTML =
+    '<span><b>' + RACE.course + '</b> ' + RACE.surface + RACE.distance + 'm</span>'
+    + '<span>馬場 <b>' + (RACE.cond || '良') + '</b></span>'
+    + '<span><b>' + (RACE['class'] || '') + '</b></span>'
+    + '<span><b>' + N + '</b>頭</span>';
+  document.getElementById('footer').textContent =
+    'seed=' + DATA.seed + ' ／ 馬名はすべて架空です';
+
+  // ---- 結果 ----
+  const resultBody = document.getElementById('result-body');
+  resultBody.innerHTML = DATA.horses.map(function (h) {
+    const cls = (h.finish === 1 ? 'win' : '') + (h.is_player ? ' mine' : '');
+    return '<tr class="' + cls + '"><td>' + h.finish + '</td><td class="num">' + h.no + '</td>'
+      + '<td>' + h.name + '</td><td class="num">' + mmss(h.time) + '</td>'
+      + '<td class="num">' + (h.finish === 1 ? '—' : '+' + h.margin.toFixed(1)) + '</td>'
+      + '<td class="num">' + h.last3f.toFixed(1) + '</td>'
+      + '<td class="num">' + h.passing.join('-') + '</td><td>' + h.style + '</td></tr>';
+  }).join('');
+
+  function mmss(sec) {
+    const total = Math.round(sec * 10) / 10;
+    const m = Math.floor(total / 60);
+    const s = total - m * 60;
+    return m > 0 ? m + ':' + (s < 10 ? '0' : '') + s.toFixed(1) : s.toFixed(1);
+  }
+
+  const revealBtn = document.getElementById('reveal');
+  const resultWrap = document.getElementById('result-wrap');
+  function reveal() {
+    resultWrap.hidden = false;
+    revealBtn.hidden = true;
+  }
+  revealBtn.addEventListener('click', reveal);
+
+  // ---- 再生 ----
+  let t = 0, playing = false, speed = 1, last = 0;
+  const playBtn = document.getElementById('play');
+  const scrub = document.getElementById('scrub');
+
+  function setPlaying(on) {
+    playing = on;
+    playBtn.textContent = on ? '⏸ 一時停止' : (t >= MAX_TIME ? '▶ もう一度' : '▶ スタート');
+    if (on) { last = performance.now(); requestAnimationFrame(step); }
+  }
+
+  function step(now) {
+    if (!playing) return;
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    t += dt * speed;
+    if (t >= MAX_TIME) {
+      t = MAX_TIME;
+      setPlaying(false);
+      reveal();
+    }
+    scrub.value = String(Math.round(t / MAX_TIME * 1000));
+    render(t);
+    if (playing) requestAnimationFrame(step);
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (t >= MAX_TIME) { t = 0; }
+    setPlaying(!playing);
+  });
+  document.getElementById('restart').addEventListener('click', function () {
+    t = 0; scrub.value = '0'; render(t); setPlaying(false);
+  });
+  scrub.addEventListener('input', function () {
+    setPlaying(false);
+    t = Number(scrub.value) / 1000 * MAX_TIME;
+    render(t);
+  });
+  document.querySelectorAll('.speeds button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      speed = Number(b.dataset.speed);
+      document.querySelectorAll('.speeds button').forEach(function (o) {
+        o.setAttribute('aria-pressed', String(o === b));
+      });
+    });
+  });
+
+  render(0);
+})();
+</script>

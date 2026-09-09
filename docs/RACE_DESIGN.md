@@ -203,6 +203,9 @@ race_sim/viewer.html   horse_logic.py
 - **道中の位置は絶えず入れ替わる**。区間配分を脚質だけで決めると、同じ脚質の馬の
   通過順が「6-6-6-6」と道中まったく動かない。区間ごとに小さな揺れを入れている
   （合計は変えないので着順には影響しない）
+- **レース内の上がり3Fのばらつき**は芝でSD0.86秒、ダートで1.13秒。脚質による区間配分の
+  差をそのまま使うと芝でSD1.24まで広がり、後方の馬が非現実的な差し切りを見せた。
+  差の強さを芝0.70・ダ0.88に絞って実測に合わせている（`STYLE_SHAPE_SCALE`）
 
 ## 6. ライバル馬プール
 
@@ -243,13 +246,32 @@ race_sim/viewer.html   horse_logic.py
    `rivals.is_supported(race)` がその条件を組めるかを返すので、番組を組む側（Phase 5の
    レース番組表）は必ずこれを見ること。
 
-## 7. 世代交代
+## 7. 再生ビューア
+
+`race_sim/viewer.html` が結果JSONを読んでレースを再生する。外部ライブラリを一切使わず、
+canvas 2D と標準のDOMだけで動く。`tools/make_viewer.py` が結果を埋め込んだHTMLを書き出す
+（1レースぶんで約25KB）。
+
+- 位置は**区間タイムから補間**する。区間の中は等速とみなす
+- カメラは隊列を追い、馬群が画面に収まる倍率を毎フレーム決める
+- **枠番の色はJRAの実際の配色**（1白 2黒 3赤 4青 5黄 6緑 7橙 8桃）。枠は均等割りで、
+  余りは外枠から1頭ずつ足す。16頭なら各枠2頭、18頭なら7枠と8枠だけ3頭になる
+- 結果は最初は伏せてあり、再生が終わるか「結果を表示」を押すと出る
+
+⭕ テンプレートは `<html>` や `<head>` を持たない**断片**の形にしてある。Artifactとして
+   公開するときはこの形でなければならず、ブラウザで直接開く用途では make_viewer.py が
+   完全なHTML文書に包む。
+
+⭕ 結果JSONは `<script type="application/json">` に埋め込む。中の `</` をエスケープしないと、
+   馬名やレース名に `</script>` が入ったときにブロックが途中で閉じてページが壊れる。
+
+## 8. 世代交代
 
 一定の出走数、または年齢（例：6歳）で引退。牡なら種牡馬、牝なら繁殖入りし、
 次世代の初期値に血統補正が乗る。前世代の成績が良いほど補正が大きい。
 これにより能力上限に達した後もゲームが続く。
 
-## 8. 既存RPGからの移行
+## 9. 既存RPGからの移行
 
 - `study_logic.py` から `BOSS_LIST` / `BADGE_DEFINITIONS` / レベル計算を削除し、`horse_logic.py` へ置換
 - `ui_study.py`、`ui_common.build_event_message()`、`MainMenuView` のボス表示を書き換え
@@ -257,7 +279,7 @@ race_sim/viewer.html   horse_logic.py
   **`load_stable()` の中で検出して初代馬の `growth` に読み替える**。移行スクリプトは書かない
   （このリポジトリの流儀：CLAUDE.md「データ形式の移行は読み込み時に行う」）
 
-## 9. 定期配信への組み込み
+## 10. 定期配信への組み込み
 
 `@tasks.loop(time=DELIVERY_TIMES)` は1つだけ、という既存ルールを守る。
 
@@ -266,19 +288,19 @@ race_sim/viewer.html   horse_logic.py
 - 結果の再掲：月曜朝の週間サマリー内
 - `/test_race` を用意し、時刻を待たずに動作確認できるようにする（`/test_reminder` と同じ流儀）
 
-## 10. フェーズ計画
+## 11. フェーズ計画
 
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | ✅1 | レースエンジン＋較正、CLIで着順出力 | **完了**（§5の較正結果を参照）。テスト20件 |
 | ✅2 | ライバル馬プール生成バッチ | **完了**（§6を参照）。テスト17件 |
-| 3 | 再生ビューア（HTML/canvas） | 結果JSONを読み込んでレースがアニメ再生される |
+| ✅3 | 再生ビューア（HTML/canvas） | **完了**（§7を参照）。テスト9件 |
 | 4 | `horse_logic.py` ＋ Discord UI、RPG削除・データ移行 | 既存の活動記録が馬の能力として反映される |
 | 5 | 週次開催を定期配信に組み込み | 日曜20:00に自動開催、月曜朝に再掲 |
 
 一番の山は Phase 1。ここが実データに合えば残りは配管になる。
 
-### Phase 1・2 の成果物
+### Phase 1〜3 の成果物
 
 | ファイル | 役割 | 実行環境 |
 |---|---|---|
@@ -291,13 +313,17 @@ race_sim/viewer.html   horse_logic.py
 | `race_sim/data/rivals.json` | 実データから生成した架空馬2,683頭（890KB） | — |
 | `race_sim/tools/build_rivals.py` | 実データ→ライバル馬プールの生成バッチ | keiba_score_search の venv |
 | `tests/test_race_engine.py` | エンジンのテスト20件 | pytest |
+| `race_sim/viewer.html` | 再生ビューアのテンプレート（外部ライブラリ不要） | ブラウザ |
+| `race_sim/tools/make_viewer.py` | 結果を埋め込んだ再生用HTMLを書き出す | 標準ライブラリのみ |
 | `tests/test_rivals.py` | 出走表のテスト17件 | pytest |
+| `tests/test_viewer.py` | 再生ビューアのテスト9件 | pytest |
 
 ```bash
 PYTHONIOENCODING=utf-8 python race_sim/tools/run_race.py --course 中山 --distance 2000 --class G1
+PYTHONIOENCODING=utf-8 python race_sim/tools/make_viewer.py --out race.html --name 銀嶺ステークス
 ```
 
-## 11. テスト方針
+## 12. テスト方針
 
 既存の流儀（CLAUDE.md「テスト」節）に従う。
 
