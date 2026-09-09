@@ -2,581 +2,664 @@
  "base": {
   "中京|ダ|1200": {
    "field": 15.1,
-   "last3f": 36.75,
+   "last3f": 36.58,
+   "last3f_sd": 0.6,
    "n": 335,
    "win_time": 72.12,
    "win_time_sd": 0.66
   },
   "中京|ダ|1400": {
    "field": 15.1,
-   "last3f": 37.28,
+   "last3f": 37.17,
+   "last3f_sd": 0.72,
    "n": 446,
    "win_time": 84.85,
    "win_time_sd": 0.72
   },
   "中京|ダ|1800": {
    "field": 13.2,
-   "last3f": 37.84,
+   "last3f": 37.69,
+   "last3f_sd": 0.89,
    "n": 606,
    "win_time": 113.69,
    "win_time_sd": 1.12
   },
   "中京|ダ|1900": {
    "field": 13.3,
-   "last3f": 37.84,
+   "last3f": 37.75,
+   "last3f_sd": 0.87,
    "n": 217,
    "win_time": 120.42,
    "win_time_sd": 1.16
   },
   "中京|芝|1200": {
    "field": 15.5,
-   "last3f": 34.18,
+   "last3f": 34.25,
+   "last3f_sd": 0.69,
    "n": 168,
    "win_time": 68.56,
    "win_time_sd": 0.85
   },
   "中京|芝|1400": {
    "field": 15.3,
-   "last3f": 34.71,
+   "last3f": 34.67,
+   "last3f_sd": 0.71,
    "n": 221,
    "win_time": 80.88,
    "win_time_sd": 0.85
   },
   "中京|芝|1600": {
    "field": 13.4,
-   "last3f": 34.65,
+   "last3f": 34.53,
+   "last3f_sd": 0.79,
    "n": 291,
    "win_time": 94.06,
    "win_time_sd": 1.02
   },
   "中京|芝|2000": {
    "field": 12.8,
-   "last3f": 34.85,
+   "last3f": 34.76,
+   "last3f_sd": 0.86,
    "n": 368,
    "win_time": 120.81,
    "win_time_sd": 1.29
   },
   "中京|芝|2200": {
    "field": 12.4,
-   "last3f": 35.15,
+   "last3f": 35.1,
+   "last3f_sd": 0.89,
    "n": 174,
    "win_time": 133.59,
    "win_time_sd": 1.43
   },
   "中山|ダ|1200": {
    "field": 15.6,
-   "last3f": 37.19,
+   "last3f": 37.02,
+   "last3f_sd": 0.63,
    "n": 988,
    "win_time": 71.72,
    "win_time_sd": 0.61
   },
   "中山|ダ|1800": {
    "field": 14.6,
-   "last3f": 38.53,
+   "last3f": 38.34,
+   "last3f_sd": 0.82,
    "n": 1086,
    "win_time": 114.52,
    "win_time_sd": 1.12
   },
   "中山|ダ|2400": {
    "field": 13.5,
-   "last3f": 38.49,
+   "last3f": 38.63,
+   "last3f_sd": 0.85,
    "n": 80,
    "win_time": 156.37,
    "win_time_sd": 1.55
   },
   "中山|芝|1200": {
    "field": 14.5,
-   "last3f": 34.44,
+   "last3f": 34.57,
+   "last3f_sd": 0.76,
    "n": 271,
    "win_time": 68.67,
    "win_time_sd": 0.81
   },
   "中山|芝|1600": {
    "field": 14.1,
-   "last3f": 34.9,
+   "last3f": 34.87,
+   "last3f_sd": 0.78,
    "n": 458,
    "win_time": 94.21,
    "win_time_sd": 1.05
   },
   "中山|芝|1800": {
    "field": 13.1,
-   "last3f": 35.08,
+   "last3f": 35.1,
+   "last3f_sd": 0.96,
    "n": 262,
    "win_time": 108.63,
    "win_time_sd": 1.17
   },
   "中山|芝|2000": {
    "field": 14.1,
-   "last3f": 35.33,
+   "last3f": 35.24,
+   "last3f_sd": 0.85,
    "n": 353,
    "win_time": 121.01,
    "win_time_sd": 1.48
   },
   "中山|芝|2200": {
    "field": 14.1,
-   "last3f": 35.33,
+   "last3f": 35.27,
+   "last3f_sd": 0.83,
    "n": 146,
    "win_time": 134.3,
    "win_time_sd": 1.59
   },
   "中山|芝|2500": {
    "field": 12.4,
-   "last3f": 35.31,
+   "last3f": 35.59,
+   "last3f_sd": 0.85,
    "n": 89,
    "win_time": 154.33,
    "win_time_sd": 1.69
   },
   "京都|ダ|1200": {
    "field": 14.9,
-   "last3f": 36.45,
+   "last3f": 36.35,
+   "last3f_sd": 0.65,
    "n": 356,
    "win_time": 72.25,
    "win_time_sd": 0.67
   },
   "京都|ダ|1400": {
    "field": 14.6,
-   "last3f": 37.14,
+   "last3f": 37.01,
+   "last3f_sd": 0.68,
    "n": 415,
    "win_time": 85.02,
    "win_time_sd": 0.8
   },
   "京都|ダ|1800": {
    "field": 13.0,
-   "last3f": 37.66,
+   "last3f": 37.52,
+   "last3f_sd": 0.82,
    "n": 660,
    "win_time": 113.31,
    "win_time_sd": 1.18
   },
   "京都|ダ|1900": {
    "field": 13.1,
-   "last3f": 37.67,
+   "last3f": 37.65,
+   "last3f_sd": 0.8,
    "n": 171,
    "win_time": 119.95,
    "win_time_sd": 1.15
   },
   "京都|芝|1200": {
    "field": 15.0,
-   "last3f": 34.09,
+   "last3f": 34.19,
+   "last3f_sd": 0.62,
    "n": 149,
    "win_time": 68.77,
    "win_time_sd": 0.98
   },
   "京都|芝|1400": {
    "field": 14.1,
-   "last3f": 34.34,
+   "last3f": 34.39,
+   "last3f_sd": 0.69,
    "n": 205,
    "win_time": 81.46,
    "win_time_sd": 1.21
   },
   "京都|芝|1600": {
    "field": 13.2,
-   "last3f": 34.65,
+   "last3f": 34.57,
+   "last3f_sd": 0.84,
    "n": 309,
    "win_time": 94.23,
    "win_time_sd": 1.23
   },
   "京都|芝|1800": {
    "field": 11.8,
-   "last3f": 34.57,
+   "last3f": 34.49,
+   "last3f_sd": 0.8,
    "n": 231,
    "win_time": 107.11,
    "win_time_sd": 1.35
   },
   "京都|芝|2000": {
    "field": 11.5,
-   "last3f": 34.98,
+   "last3f": 34.87,
+   "last3f_sd": 0.96,
    "n": 245,
    "win_time": 120.75,
    "win_time_sd": 1.3
   },
   "京都|芝|2200": {
    "field": 11.8,
-   "last3f": 34.74,
+   "last3f": 34.78,
+   "last3f_sd": 0.88,
    "n": 97,
    "win_time": 134.12,
    "win_time_sd": 1.58
   },
   "京都|芝|2400": {
    "field": 11.3,
-   "last3f": 34.89,
+   "last3f": 34.96,
+   "last3f_sd": 0.93,
    "n": 103,
    "win_time": 146.69,
    "win_time_sd": 1.95
   },
   "函館|ダ|1000": {
    "field": 11.6,
-   "last3f": 35.8,
+   "last3f": 35.5,
+   "last3f_sd": 0.52,
    "n": 159,
    "win_time": 58.81,
    "win_time_sd": 0.63
   },
   "函館|ダ|1700": {
    "field": 12.4,
-   "last3f": 37.96,
+   "last3f": 37.75,
+   "last3f_sd": 0.81,
    "n": 329,
    "win_time": 105.76,
    "win_time_sd": 0.91
   },
   "函館|芝|1200": {
    "field": 13.5,
-   "last3f": 34.97,
+   "last3f": 34.82,
+   "last3f_sd": 0.62,
    "n": 324,
    "win_time": 68.81,
    "win_time_sd": 0.87
   },
   "函館|芝|1800": {
    "field": 12.9,
-   "last3f": 35.43,
+   "last3f": 35.29,
+   "last3f_sd": 0.7,
    "n": 145,
    "win_time": 108.04,
    "win_time_sd": 1.33
   },
   "函館|芝|2000": {
    "field": 12.5,
-   "last3f": 35.73,
+   "last3f": 35.55,
+   "last3f_sd": 0.83,
    "n": 126,
    "win_time": 120.78,
    "win_time_sd": 1.23
   },
   "函館|芝|2600": {
    "field": 11.9,
-   "last3f": 36.04,
+   "last3f": 35.9,
+   "last3f_sd": 0.97,
    "n": 55,
    "win_time": 161.45,
    "win_time_sd": 2.14
   },
   "小倉|ダ|1000": {
    "field": 13.5,
-   "last3f": 35.64,
+   "last3f": 35.43,
+   "last3f_sd": 0.57,
    "n": 252,
    "win_time": 58.62,
    "win_time_sd": 0.69
   },
   "小倉|ダ|1700": {
    "field": 14.7,
-   "last3f": 37.78,
+   "last3f": 37.63,
+   "last3f_sd": 0.78,
    "n": 559,
    "win_time": 105.87,
    "win_time_sd": 1.0
   },
   "小倉|芝|1200": {
    "field": 15.9,
-   "last3f": 34.82,
+   "last3f": 34.67,
+   "last3f_sd": 0.69,
    "n": 554,
    "win_time": 68.1,
    "win_time_sd": 0.88
   },
   "小倉|芝|1800": {
    "field": 13.6,
-   "last3f": 35.5,
+   "last3f": 35.32,
+   "last3f_sd": 0.9,
    "n": 316,
    "win_time": 107.6,
    "win_time_sd": 1.26
   },
   "小倉|芝|2000": {
    "field": 13.6,
-   "last3f": 35.81,
+   "last3f": 35.62,
+   "last3f_sd": 0.91,
    "n": 312,
    "win_time": 120.35,
    "win_time_sd": 1.41
   },
   "小倉|芝|2600": {
    "field": 12.5,
-   "last3f": 35.9,
+   "last3f": 35.89,
+   "last3f_sd": 1.05,
    "n": 89,
    "win_time": 160.34,
    "win_time_sd": 1.86
   },
   "新潟|ダ|1200": {
    "field": 14.5,
-   "last3f": 37.02,
+   "last3f": 36.82,
+   "last3f_sd": 0.59,
    "n": 491,
    "win_time": 71.68,
    "win_time_sd": 0.65
   },
   "新潟|ダ|1800": {
    "field": 13.7,
-   "last3f": 38.16,
+   "last3f": 37.97,
+   "last3f_sd": 0.83,
    "n": 596,
    "win_time": 113.49,
    "win_time_sd": 1.06
   },
   "新潟|芝|1000": {
    "field": 16.6,
-   "last3f": 33.0,
+   "last3f": 32.97,
+   "last3f_sd": 0.6,
    "n": 195,
    "win_time": 55.18,
    "win_time_sd": 0.71
   },
   "新潟|芝|1200": {
    "field": 15.9,
-   "last3f": 34.95,
+   "last3f": 34.78,
+   "last3f_sd": 0.61,
    "n": 129,
    "win_time": 69.02,
    "win_time_sd": 0.76
   },
   "新潟|芝|1400": {
    "field": 16.0,
-   "last3f": 35.16,
+   "last3f": 35.06,
+   "last3f_sd": 0.76,
    "n": 152,
    "win_time": 81.39,
    "win_time_sd": 0.87
   },
   "新潟|芝|1600": {
    "field": 14.5,
-   "last3f": 33.91,
+   "last3f": 33.77,
+   "last3f_sd": 0.74,
    "n": 172,
    "win_time": 94.01,
    "win_time_sd": 1.08
   },
   "新潟|芝|1800": {
    "field": 13.9,
-   "last3f": 34.27,
+   "last3f": 34.1,
+   "last3f_sd": 0.97,
    "n": 221,
    "win_time": 107.03,
    "win_time_sd": 1.18
   },
   "新潟|芝|2000": {
    "field": 13.6,
-   "last3f": 34.88,
+   "last3f": 34.72,
+   "last3f_sd": 1.06,
    "n": 207,
    "win_time": 120.56,
    "win_time_sd": 1.46
   },
   "新潟|芝|2200": {
    "field": 13.1,
-   "last3f": 35.52,
+   "last3f": 35.45,
+   "last3f_sd": 0.75,
    "n": 81,
    "win_time": 133.95,
    "win_time_sd": 1.53
   },
   "新潟|芝|2400": {
    "field": 13.3,
-   "last3f": 35.65,
+   "last3f": 35.43,
+   "last3f_sd": 1.01,
    "n": 45,
    "win_time": 147.49,
    "win_time_sd": 2.03
   },
   "札幌|ダ|1000": {
    "field": 11.5,
-   "last3f": 35.57,
+   "last3f": 35.32,
+   "last3f_sd": 0.54,
    "n": 138,
    "win_time": 58.96,
    "win_time_sd": 0.64
   },
   "札幌|ダ|1700": {
    "field": 13.3,
-   "last3f": 37.81,
+   "last3f": 37.59,
+   "last3f_sd": 0.78,
    "n": 358,
    "win_time": 106.02,
    "win_time_sd": 0.78
   },
   "札幌|芝|1200": {
    "field": 14.0,
-   "last3f": 34.91,
+   "last3f": 34.83,
+   "last3f_sd": 0.69,
    "n": 189,
    "win_time": 69.06,
    "win_time_sd": 0.86
   },
   "札幌|芝|1500": {
    "field": 12.5,
-   "last3f": 35.42,
+   "last3f": 35.23,
+   "last3f_sd": 0.87,
    "n": 130,
    "win_time": 88.97,
    "win_time_sd": 1.26
   },
   "札幌|芝|1800": {
    "field": 11.1,
-   "last3f": 35.52,
+   "last3f": 35.46,
+   "last3f_sd": 0.85,
    "n": 131,
    "win_time": 108.88,
    "win_time_sd": 1.35
   },
   "札幌|芝|2000": {
    "field": 13.7,
-   "last3f": 35.84,
+   "last3f": 35.65,
+   "last3f_sd": 0.9,
    "n": 162,
    "win_time": 121.37,
    "win_time_sd": 1.24
   },
   "札幌|芝|2600": {
    "field": 12.4,
-   "last3f": 36.07,
+   "last3f": 36.09,
+   "last3f_sd": 0.96,
    "n": 69,
    "win_time": 161.96,
    "win_time_sd": 1.64
   },
   "東京|ダ|1300": {
    "field": 15.6,
-   "last3f": 36.39,
+   "last3f": 36.14,
+   "last3f_sd": 0.65,
    "n": 197,
    "win_time": 78.63,
    "win_time_sd": 0.72
   },
   "東京|ダ|1400": {
    "field": 15.6,
-   "last3f": 36.45,
+   "last3f": 36.34,
+   "last3f_sd": 0.72,
    "n": 741,
    "win_time": 85.01,
    "win_time_sd": 0.77
   },
   "東京|ダ|1600": {
    "field": 14.8,
-   "last3f": 36.68,
+   "last3f": 36.56,
+   "last3f_sd": 0.78,
    "n": 885,
    "win_time": 97.67,
    "win_time_sd": 0.86
   },
   "東京|ダ|2100": {
    "field": 14.5,
-   "last3f": 37.13,
+   "last3f": 37.09,
+   "last3f_sd": 0.9,
    "n": 327,
    "win_time": 132.36,
    "win_time_sd": 1.4
   },
   "東京|芝|1400": {
    "field": 14.8,
-   "last3f": 33.92,
+   "last3f": 33.91,
+   "last3f_sd": 0.67,
    "n": 393,
    "win_time": 81.23,
    "win_time_sd": 0.92
   },
   "東京|芝|1600": {
    "field": 13.8,
-   "last3f": 34.0,
+   "last3f": 33.93,
+   "last3f_sd": 0.69,
    "n": 477,
    "win_time": 93.71,
    "win_time_sd": 0.98
   },
   "東京|芝|1800": {
    "field": 12.9,
-   "last3f": 33.96,
+   "last3f": 33.91,
+   "last3f_sd": 0.73,
    "n": 403,
    "win_time": 106.92,
    "win_time_sd": 1.11
   },
   "東京|芝|2000": {
    "field": 11.5,
-   "last3f": 34.09,
+   "last3f": 34.05,
+   "last3f_sd": 0.86,
    "n": 313,
    "win_time": 120.03,
    "win_time_sd": 1.28
   },
   "東京|芝|2400": {
    "field": 12.4,
-   "last3f": 34.32,
+   "last3f": 34.38,
+   "last3f_sd": 0.78,
    "n": 258,
    "win_time": 146.11,
    "win_time_sd": 1.48
   },
   "福島|ダ|1150": {
    "field": 15.4,
-   "last3f": 36.95,
+   "last3f": 36.78,
+   "last3f_sd": 0.55,
    "n": 276,
    "win_time": 68.73,
    "win_time_sd": 0.6
   },
   "福島|ダ|1700": {
    "field": 14.5,
-   "last3f": 38.13,
+   "last3f": 37.96,
+   "last3f_sd": 0.8,
    "n": 465,
    "win_time": 106.54,
    "win_time_sd": 0.95
   },
   "福島|芝|1200": {
    "field": 15.1,
-   "last3f": 35.04,
+   "last3f": 34.9,
+   "last3f_sd": 0.66,
    "n": 387,
    "win_time": 69.1,
    "win_time_sd": 0.9
   },
   "福島|芝|1800": {
    "field": 14.4,
-   "last3f": 35.57,
+   "last3f": 35.4,
+   "last3f_sd": 0.71,
    "n": 212,
    "win_time": 108.36,
    "win_time_sd": 1.14
   },
   "福島|芝|2000": {
    "field": 14.3,
-   "last3f": 35.77,
+   "last3f": 35.66,
+   "last3f_sd": 0.83,
    "n": 189,
    "win_time": 120.75,
    "win_time_sd": 1.23
   },
   "福島|芝|2600": {
    "field": 13.8,
-   "last3f": 36.01,
+   "last3f": 35.96,
+   "last3f_sd": 0.8,
    "n": 98,
    "win_time": 161.34,
    "win_time_sd": 2.01
   },
   "阪神|ダ|1200": {
    "field": 14.8,
-   "last3f": 36.65,
+   "last3f": 36.5,
+   "last3f_sd": 0.62,
    "n": 481,
    "win_time": 72.3,
    "win_time_sd": 0.58
   },
   "阪神|ダ|1400": {
    "field": 15.0,
-   "last3f": 37.26,
+   "last3f": 37.13,
+   "last3f_sd": 0.72,
    "n": 600,
    "win_time": 84.96,
    "win_time_sd": 0.64
   },
   "阪神|ダ|1800": {
    "field": 12.9,
-   "last3f": 37.8,
+   "last3f": 37.62,
+   "last3f_sd": 0.84,
    "n": 929,
    "win_time": 113.76,
    "win_time_sd": 1.1
   },
   "阪神|ダ|2000": {
    "field": 12.8,
-   "last3f": 37.9,
+   "last3f": 37.87,
+   "last3f_sd": 0.85,
    "n": 167,
    "win_time": 126.78,
    "win_time_sd": 1.2
   },
   "阪神|芝|1200": {
    "field": 13.7,
-   "last3f": 34.24,
+   "last3f": 34.34,
+   "last3f_sd": 0.69,
    "n": 168,
    "win_time": 68.79,
    "win_time_sd": 0.62
   },
   "阪神|芝|1400": {
    "field": 14.2,
-   "last3f": 34.77,
+   "last3f": 34.8,
+   "last3f_sd": 0.64,
    "n": 241,
    "win_time": 81.06,
    "win_time_sd": 0.82
   },
   "阪神|芝|1600": {
    "field": 13.7,
-   "last3f": 34.14,
+   "last3f": 34.13,
+   "last3f_sd": 0.75,
    "n": 393,
    "win_time": 93.93,
    "win_time_sd": 0.94
   },
   "阪神|芝|1800": {
    "field": 12.2,
-   "last3f": 34.31,
+   "last3f": 34.23,
+   "last3f_sd": 0.84,
    "n": 283,
    "win_time": 106.53,
    "win_time_sd": 1.04
   },
   "阪神|芝|2000": {
    "field": 11.5,
-   "last3f": 35.0,
+   "last3f": 34.98,
+   "last3f_sd": 0.79,
    "n": 302,
    "win_time": 120.63,
    "win_time_sd": 1.15
   },
   "阪神|芝|2200": {
    "field": 12.5,
-   "last3f": 35.14,
+   "last3f": 35.21,
+   "last3f_sd": 0.92,
    "n": 87,
    "win_time": 133.24,
    "win_time_sd": 1.12
@@ -584,13 +667,15 @@
   "阪神|芝|2400": {
    "field": 10.7,
    "last3f": 34.62,
+   "last3f_sd": 0.98,
    "n": 138,
    "win_time": 147.11,
    "win_time_sd": 1.67
   },
   "阪神|芝|2600": {
    "field": 12.0,
-   "last3f": 34.82,
+   "last3f": 34.96,
+   "last3f_sd": 0.72,
    "n": 24,
    "win_time": 159.07,
    "win_time_sd": 1.92
@@ -758,32 +843,28 @@
  },
  "last3f_class_offset": {
   "1勝": {
-   "n": 5488,
    "offset": 0.0
   },
   "2勝": {
-   "n": 2526,
-   "offset": -0.254
+   "offset": -0.26
   },
   "3勝": {
-   "n": 763,
-   "offset": -0.478
+   "offset": -0.463
   },
   "G1": {
-   "n": 71,
-   "offset": -0.237
+   "offset": -0.38
+  },
+  "G2": {
+   "offset": -0.349
   },
   "G3": {
-   "n": 83,
-   "offset": -0.242
+   "offset": -0.356
   },
   "OP": {
-   "n": 371,
-   "offset": -0.438
+   "offset": -0.425
   },
   "未勝利": {
-   "n": 6359,
-   "offset": 0.58
+   "offset": 0.566
   }
  },
  "margin": {
@@ -834,7 +915,7 @@
    "rows_dropped": 189,
    "winners": 25809
   },
-  "generated_at": "2026-09-09T23:43:18+09:00",
+  "generated_at": "2026-09-10T07:22:11+09:00",
   "min_cell_races": 20,
   "races": 26052,
   "rows": 353515,

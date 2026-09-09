@@ -125,7 +125,7 @@ def fit_additive(con, iterations=30):
        使って推定されるので、出走の少ない群にも値が付き、構成比の偏りも吸収される。
 
     Returns:
-        tuple: (base, class_offset, cond_offset, fit_stats)
+        tuple: (base, class_offset, cond_offset, last3f_class_offset, fit_stats)
     """
     winners = q(con, """
         SELECT basho, surface, distance, cls, track_cond, race_time, last3f, field_size
@@ -142,59 +142,76 @@ def fit_additive(con, iterations=30):
     class_keys = {r[1] for r in rows}
     cond_keys = {r[2] for r in rows}
 
-    base = {k: 0.0 for k in course_keys}
-    class_off = {k: 0.0 for k in class_keys}
-    cond_off = {k: 0.0 for k in cond_keys}
+    def alternating_fit(value_index):
+        """指定した列（走破タイム or 上がり3F）を3つの効果に分解する。"""
+        base = {k: 0.0 for k in course_keys}
+        class_off = {k: 0.0 for k in class_keys}
+        cond_off = {k: 0.0 for k in cond_keys}
 
-    def mean_residual_by(index, current):
-        """指定した次元でグループ化し、他の効果を差し引いた残差の平均を返す。"""
-        acc = {k: [0.0, 0] for k in current}
-        for r in rows:
-            key = r[index]
-            resid = r[3] - base[r[0]] - class_off[r[1]] - cond_off[r[2]] + current[key]
-            acc[key][0] += resid
-            acc[key][1] += 1
-        return {k: (s / n if n else 0.0) for k, (s, n) in acc.items()}
+        def mean_residual_by(index, current):
+            acc = {k: [0.0, 0] for k in current}
+            for r in rows:
+                key = r[index]
+                resid = (r[value_index] - base[r[0]] - class_off[r[1]] - cond_off[r[2]]
+                         + current[key])
+                acc[key][0] += resid
+                acc[key][1] += 1
+            return {k: (s / n if n else 0.0) for k, (s, n) in acc.items()}
 
-    for _ in range(iterations):
-        base = mean_residual_by(0, base)
-        class_off = mean_residual_by(1, class_off)
-        cond_off = mean_residual_by(2, cond_off)
-        # 定数項の重複を防ぐため、基準クラス・基準馬場を0に固定してコース側へ寄せる
-        anchor_c = class_off[BASE_CLASS]
-        for k in class_off:
-            class_off[k] -= anchor_c
-        for s in {c.split('|')[0] for c in cond_keys}:
-            anchor_t = cond_off.get(f"{s}|{BASE_COND}", 0.0)
-            for k in cond_off:
-                if k.startswith(s + '|'):
-                    cond_off[k] -= anchor_t
-        for k in base:
-            base[k] += anchor_c
+        for _ in range(iterations):
+            base = mean_residual_by(0, base)
+            class_off = mean_residual_by(1, class_off)
+            cond_off = mean_residual_by(2, cond_off)
+            # 定数項の重複を防ぐため、基準クラス・基準馬場を0に固定してコース側へ寄せる
+            anchor_c = class_off[BASE_CLASS]
+            for k in class_off:
+                class_off[k] -= anchor_c
+            for s in {c.split('|')[0] for c in cond_keys}:
+                anchor_t = cond_off.get(f"{s}|{BASE_COND}", 0.0)
+                for k in cond_off:
+                    if k.startswith(s + '|'):
+                        cond_off[k] -= anchor_t
+            for k in base:
+                base[k] += anchor_c
+        return base, class_off, cond_off
+
+    base, class_off, cond_off = alternating_fit(3)
+
+    # ⭕ 上がり3Fのクラス差も同じ分解で求める。同一コース内のペア比較で出していたときは
+    #    セル本数が足りず G2 だけ欠落し、較正の判定で G2 の上がりだけ0.87秒ずれた。
+    _, last3f_class, _ = alternating_fit(4)
 
     # 当てはまりの確認とコース別のばらつき
-    per_course = {k: [0, 0.0, 0.0, 0.0, 0.0] for k in course_keys}  # n, Σresid, Σresid², Σl3f, Σfield
+    per_course = {k: [0, 0.0, 0.0, 0.0, 0.0, 0.0] for k in course_keys}
     sse = 0.0
     for course, cls, cond, t, l3, fs in rows:
         resid = t - base[course] - class_off[cls] - cond_off[cond]
         sse += resid * resid
+        # 上がり3Fは、クラス差を取り除いた残差のばらつきを記録する。
+        # ⭕ エンジンはコース別の平均を基準に使うので、その基準まわりで実際に
+        #    どれだけ動くか（ペースによる上下）も必要になる。
+        l3_resid = (l3 or 0.0) - last3f_class.get(cls, 0.0)
         p = per_course[course]
         p[0] += 1
         p[1] += resid
         p[2] += resid * resid
-        p[3] += l3 or 0.0
+        p[3] += l3_resid
         p[4] += fs or 0.0
+        p[5] += l3_resid * l3_resid
 
     base_out = {}
-    for k, (n, s1, s2, sl, sf) in per_course.items():
+    for k, (n, s1, s2, sl, sf, sl2) in per_course.items():
         if n < MIN_CELL_RACES:
             continue
         var = max(0.0, s2 / n - (s1 / n) ** 2)
+        l3_mean = sl / n
+        l3_var = max(0.0, sl2 / n - l3_mean ** 2)
         base_out[k] = {
             'n': n,
             'win_time': round(base[k], 2),
             'win_time_sd': round(var ** 0.5, 2),
-            'last3f': round(sl / n, 2),
+            'last3f': round(l3_mean, 2),
+            'last3f_sd': round(l3_var ** 0.5, 2),
             'field': round(sf / n, 1),
         }
 
@@ -215,7 +232,8 @@ def fit_additive(con, iterations=30):
     for k, cnt in count_by(rows, 2).items():
         cond_out[k]['n'] = cnt
 
-    return base_out, class_out, cond_out, stats
+    last3f_out = {k: {'offset': round(v, 3)} for k, v in sorted(last3f_class.items())}
+    return base_out, class_out, cond_out, last3f_out, stats
 
 
 def count_by(rows, index):
@@ -223,33 +241,6 @@ def count_by(rows, index):
     for r in rows:
         acc[r[index]] = acc.get(r[index], 0) + 1
     return acc
-
-
-def collect_last3f_class(con):
-    """上がり3Fのクラス別の差。同一コース内のペア比較で基準クラスとの差を取る。
-
-    ⭕ コース平均の上がり3Fだけを基準にすると、上のクラスほど速いという当然の傾向が
-       誤差に見えてしまい、較正の判定が甘くなる。
-    """
-    rows = q(con, f"""
-        WITH win AS (
-          SELECT basho, surface, distance, cls, last3f
-          FROM runners2
-          WHERE finish_pos = 1 AND cls IS NOT NULL AND last3f > 0 AND track_cond = '{BASE_COND}'
-        ),
-        cell AS (
-          SELECT basho, surface, distance, cls, count(*) n, avg(last3f) l
-          FROM win GROUP BY 1,2,3,4 HAVING count(*) >= {MIN_CELL_RACES}
-        ),
-        ref AS (
-          SELECT basho, surface, distance, l AS l_ref FROM cell WHERE cls = '{BASE_CLASS}'
-        )
-        SELECT c.cls, sum(c.n) n, sum((c.l - r.l_ref) * c.n) / sum(c.n) AS offset_sec
-        FROM cell c JOIN ref r
-          ON c.basho = r.basho AND c.surface = r.surface AND c.distance = r.distance
-        GROUP BY 1 ORDER BY 1
-    """)
-    return {cls: {'n': n, 'offset': round(off, 3)} for cls, n, off in rows}
 
 
 def collect_margins(con):
@@ -322,7 +313,7 @@ def main():
     """)[0]
     print(f"対象: {total:,}行 / {races:,}レース (20{y0}-20{y1})")
 
-    base, class_off, cond_off, fit = fit_additive(con)
+    base, class_off, cond_off, last3f_class, fit = fit_additive(con)
 
     result = {
         'meta': {
@@ -337,7 +328,7 @@ def main():
         'base': base,
         'class_offset': class_off,
         'cond_offset': cond_off,
-        'last3f_class_offset': collect_last3f_class(con),
+        'last3f_class_offset': last3f_class,
         'margin': collect_margins(con),
         'style': collect_style(con),
         'favorite': collect_favorite_hit(con),

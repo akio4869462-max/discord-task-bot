@@ -40,12 +40,16 @@ HORSE_NOISE_SD = 0.40
 WIT_NOISE_REDUCTION = 0.30
 # 瞬発力が終い3ハロンの配分をどれだけ動かすか（メンバー平均との差1.0あたり）
 DASH_SPLIT_SHIFT = 0.012
-# 走破タイムの短縮ぶんのうち、上がり3Fに現れる割合。速いレースほど小さくなる。
-# ⭕ 実測のクラス別上がり差から求めた（tools/calibrate.py --last3f で確認できる）。
-LAST3F_R0 = 0.55
-LAST3F_R1 = 0.22
-# 上がり3F全体の水準合わせ[秒]。区間テンプレートだけだと一律に速く出るため。
-LAST3F_BIAS = 0.45
+# 較正データにコース別の上がり3Fが無い場合の既定値[秒]
+DEFAULT_LAST3F = {'芝': 34.8, 'ダ': 37.2}
+# ペースが上がり3Fに与える影響[秒]。前半が速いレースほど終いはかかる。
+LAST3F_PACE_COEF = 0.5
+# 上がり3Fのレースごとのブレ。コース別の実測SD(約0.7秒)に対する割合。
+LAST3F_NOISE_RATIO = 0.75
+# 道中の位置取りの揺れ[秒]。区間ごとに前後する。
+# ⭕ これが無いと、同じ脚質の馬は区間配分がまったく同じになり、通過順が
+#    「6-6-6-6」のように道中まったく動かない。実際のレースでは位置は絶えず入れ替わる。
+SECTION_JITTER = 0.12
 # 不利・出遅れの発生率と失う秒数
 TROUBLE_RATE = 0.06
 TROUBLE_LOSS = (0.3, 1.3)
@@ -230,12 +234,10 @@ def _section_template(style, n_sections, pace):
     return [w * n_sections / total for w in weights]
 
 
-def _splits_for(total_time, style, distance, pace, dash_z, level_dev=0.0):
+def _splits_for(total_time, style, distance, pace, dash_z, rng=None):
     """1頭ぶんの200m区間ラップを作る。合計は必ず total_time に一致する。
 
-    Args:
-        level_dev (float): 1勝クラスの基準タイムより何秒速いか。速いレースほど
-            短縮ぶんが前半に回る性質（下の LAST3F_R を参照）を再現するために使う。
+    上がり3Fの水準合わせは、全馬の配分が出そろってから _anchor_last3f で行う。
     """
     n_sections = max(1, int(round(distance / 200.0)))
     tmpl = _section_template(style, n_sections, pace)
@@ -250,26 +252,76 @@ def _splits_for(total_time, style, distance, pace, dash_z, level_dev=0.0):
                 tmpl[i] += shift * 3.0 / (n_sections - 3)
 
     unit = total_time / n_sections
-    splits = [round(w * unit, 2) for w in tmpl]
+    splits = [w * unit for w in tmpl]
 
-    # ⭕ 実データでは、上のクラスほど上がり3Fが速い……という単純な話にならない。
-    #    1勝クラスとの上がりの差は 3勝 -0.48秒、G3 -0.24秒、G1 -0.24秒で、走破タイムの
-    #    短縮幅（G1は-2.01秒）ほどには速くならない。速いレースほどペースが上がり、
-    #    短縮ぶんが前半に回って終いは相対的にかかるためである。区間へ一律比例で
-    #    配分するとこの性質が消え、G1の上がりが実測より1秒以上速くなった。
-    if n_sections >= 5:
-        share_proportional = 3.0 / n_sections
-        share_actual = max(0.05, min(0.9, LAST3F_R0 - LAST3F_R1 * level_dev))
-        extra = (share_proportional - share_actual) * level_dev + LAST3F_BIAS
-        for i in range(n_sections):
-            if i >= n_sections - 3:
-                splits[i] = round(splits[i] + extra / 3.0, 2)
-            else:
-                splits[i] = round(splits[i] - extra / (n_sections - 3), 2)
+    # 道中の位置取りの揺れ。合計は動かさないので着順には影響しない。
+    if rng is not None and n_sections >= 3:
+        jitter = [rng.gauss(0.0, SECTION_JITTER) for _ in range(n_sections)]
+        mean = sum(jitter) / n_sections
+        splits = [max(1.0, s + j - mean) for s, j in zip(splits, jitter)]
+
+    splits = [round(s, 2) for s in splits]
 
     # 丸め誤差を最終区間で吸収し、合計を total_time に揃える
     splits[-1] = round(splits[-1] + (total_time - sum(splits)), 2)
     return splits
+
+
+def base_last3f(race, baseline=None, pace=0.0, rng=None):
+    """そのコース・クラスの基準となる上がり3F[秒]を返す。
+
+    ⭕ 上がり3Fの水準は芝とダートで2秒以上違い、同じ芝でも距離で変わる（東京芝2400は
+       ゆったり流れて終いが速い）。区間テンプレートから導くと、芝の長距離で実測より
+       2.3秒遅く、ダートでは0.3〜1.0秒速く出た。走破タイムと同じように、実測の
+       コース別平均を基準として使う。
+    """
+    baseline = baseline or load_baseline()
+    key = f"{race['course']}|{race['surface']}|{race['distance']}"
+    entry = baseline['base'].get(key)
+
+    if entry:
+        t = entry['last3f']
+    else:
+        prefix = f"{race['course']}|{race['surface']}|"
+        same = [v['last3f'] for k, v in baseline['base'].items() if k.startswith(prefix)]
+        t = sum(same) / len(same) if same else DEFAULT_LAST3F.get(race['surface'], 35.0)
+
+    t += baseline.get('last3f_class_offset', {}).get(race.get('class', '1勝'), {}).get('offset', 0.0)
+
+    # ⭕ 基準値そのままに固定すると、同じコース・クラスの勝ち馬の上がりが毎回まったく
+    #    同じ値になってしまう。実測ではコース別に約0.7秒のばらつきがあり、その多くは
+    #    ペースで説明できる（前半が速ければ終いはかかる）。
+    t += LAST3F_PACE_COEF * pace
+    if rng is not None:
+        sd = (entry or {}).get('last3f_sd', 0.7) * LAST3F_NOISE_RATIO
+        t += rng.gauss(0.0, sd)
+    return t
+
+
+def _anchor_last3f(all_splits, target, winner_index):
+    """勝ち馬の上がり3Fが基準値になるよう、全馬の区間配分を同じだけずらす。
+
+    合計タイム（＝着順）は変えない。馬ごとの上がりの差もそのまま残る。
+    """
+    n_sections = len(all_splits[0])
+    if n_sections < 5:
+        return all_splits
+
+    adjust = target - sum(all_splits[winner_index][-3:])
+    out = []
+    for splits in all_splits:
+        total = sum(splits)
+        shifted = [
+            s + adjust / 3.0 if i >= n_sections - 3 else s - adjust / (n_sections - 3)
+            for i, s in enumerate(splits)
+        ]
+        if min(shifted) <= 0:
+            out.append(splits)          # 極端な補正になる場合は動かさない
+            continue
+        shifted = [round(s, 2) for s in shifted]
+        shifted[-1] = round(shifted[-1] + (total - sum(shifted)), 2)
+        out.append(shifted)
+    return out
 
 
 def _passing_positions(all_splits):
@@ -286,13 +338,12 @@ def _passing_positions(all_splits):
     # 4地点（おおむね1コーナー〜4コーナー）を等間隔に取る
     points = sorted({max(0, min(n_sections - 2, int(n_sections * f) - 1))
                      for f in (0.25, 0.5, 0.7, 0.88)})
-    positions = []
-    for i in range(n_horses):
-        row = []
-        for p in points:
-            rank = 1 + sum(1 for k in range(n_horses) if cum[k][p] < cum[i][p])
-            row.append(rank)
-        positions.append(row)
+    # ⭕ 同着の累積タイムが出ると順位が重複するので、馬番順で並びを確定させる。
+    positions = [[0] * len(points) for _ in range(n_horses)]
+    for col, p in enumerate(points):
+        order = sorted(range(n_horses), key=lambda i: (cum[i][p], i))
+        for rank, i in enumerate(order, start=1):
+            positions[i][col] = rank
     return positions
 
 
@@ -346,12 +397,15 @@ def simulate(race, entries, seed=None, baseline=None):
 
     all_splits = [
         _splits_for(r['time'], r['entry'].get('style', '先行'), race['distance'], pace,
-                    r['dash_z'], level_dev=t_base - r['time'])
+                    r['dash_z'], rng=rng)
         for r in results
     ]
-    passings = _passing_positions(all_splits)
 
     order = sorted(range(len(results)), key=lambda i: results[i]['time'])
+    all_splits = _anchor_last3f(
+        all_splits, base_last3f(race, baseline, pace=pace, rng=rng), order[0])
+    passings = _passing_positions(all_splits)
+
     finish_of = {idx: pos + 1 for pos, idx in enumerate(order)}
     winner_time = results[order[0]]['time']
 
