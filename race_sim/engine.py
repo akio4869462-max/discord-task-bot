@@ -455,12 +455,12 @@ def format_result(result):
         mark = '★' if h['is_player'] else ' '
         margin = '  --  ' if h['finish'] == 1 else f"{h['margin']:+5.1f} "
         passing = '-'.join(str(p) for p in h['passing'])
-        lines.append(f"{h['finish']:2d} {h['no']:3d} {mark}{_pad(h['name'], 20)} "
-                     f"{_mmss(h['time'])} {margin}{h['last3f']:4.1f} {_pad(passing, 11)} {h['style']}")
+        lines.append(f"{h['finish']:2d} {h['no']:3d} {mark}{pad_display(h['name'], 20)} "
+                     f"{format_time(h['time'])} {margin}{h['last3f']:4.1f} {pad_display(passing, 11)} {h['style']}")
     return '\n'.join(lines)
 
 
-def _pad(text, width):
+def pad_display(text, width):
     """全角を2桁と数えて、等幅フォントで桁が揃うように右を詰める。
 
     ⭕ str.ljust は文字数で数えるため、馬名（全角）と数字が混ざると列が崩れる。
@@ -477,7 +477,7 @@ def _pad(text, width):
     return ''.join(out) + ' ' * (width - w)
 
 
-def _mmss(sec):
+def format_time(sec):
     """秒を m:ss.s 形式にする。
 
     ⭕ 先に丸めてから分と秒に分ける。順序が逆だと 119.96秒が「1:60.0」になる。

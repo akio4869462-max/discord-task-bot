@@ -558,17 +558,52 @@ def format_races(day, races):
     return '\n'.join(lines)
 
 
-def format_result(entry_result):
-    """レース結果を整形します。"""
+RESULT_ROWS = 5     # 着順表に載せる上位の頭数
+
+
+def format_result(entry_result, rows=RESULT_ROWS):
+    """レース結果を整形します。
+
+    ⭕ メッセージ単体で何が起きたか分かるようにする。再生用HTMLは添付するが、
+       スマホのDiscordでは添付を開くのが面倒なうえ、開かないと着順が分からない
+       のでは結果を伝えたことにならない。
+    """
     race, mine = entry_result['race'], entry_result['finish']
     result = entry_result['result']
-    me = next(h for h in result['horses'] if h['is_player'])
-    head = (f"🏁 **{race['name']}** {race['course']}{race['surface']}{race['distance']}m "
-            f"{race['cond']} {len(result['horses'])}頭")
-    body = (f"**{mine}着** ／ タイム {me['time']:.1f}秒 ／ 上がり3F {me['last3f']:.1f}"
+    horses = result['horses']
+    me = next(h for h in horses if h['is_player'])
+
+    grade = f" [{race['grade']}]" if race.get('grade') else ''
+    head = (f"🏁 **{race['name']}**{grade} "
+            f"{race['course']}{race['surface']}{race['distance']}m "
+            f"{race['cond']} {len(horses)}頭")
+
+    verdict = '🥇 勝ちました！' if mine == 1 else ('🥈 惜しい2着' if mine == 2
+              else ('🥉 3着' if mine == 3 else f"{mine}着"))
+    body = (f"{verdict} ／ タイム {_mmss(me['time'])} ／ 上がり3F {me['last3f']:.1f}"
             f" ／ 通過 {'-'.join(str(p) for p in me['passing'])} ／ {me['style']}")
-    top = result['horses'][0]
-    if mine != 1:
-        body += f"\n勝ち馬: {top['name']}（{top['time']:.1f}秒）"
-    return head + '\n' + body + ('\n' + '\n'.join(entry_result['events'])
-                                 if entry_result['events'] else '')
+
+    # ⭕ 自分の馬が上位に入らなかったときは、上位に加えて自分の行も必ず出す。
+    shown = horses[:rows]
+    if me not in shown:
+        shown = shown + [me]
+
+    lines = ['```', '着 馬番 馬名                 タイム   着差']
+    for h in shown:
+        mark = '★' if h['is_player'] else ' '
+        margin = '  --  ' if h['finish'] == 1 else f"{h['margin']:+5.1f} "
+        lines.append(f"{h['finish']:2d} {h['no']:3d} {mark}{_pad(h['name'], 16)}"
+                     f" {_mmss(h['time'])} {margin}")
+    lines.append('```')
+
+    tail = '\n'.join(entry_result['events']) if entry_result['events'] else ''
+    return head + '\n' + body + '\n' + '\n'.join(lines) + ('\n' + tail if tail else '')
+
+
+def _pad(text, width):
+    """全角を2桁と数えて右を詰めます（Discordのコードブロックは等幅）。"""
+    return engine.pad_display(text, width)
+
+
+def _mmss(sec):
+    return engine.format_time(sec).strip()
