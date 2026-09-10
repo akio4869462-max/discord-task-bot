@@ -149,6 +149,10 @@ activemq-data/
 
 # Environments
 .env
+# 開発用の設定（.env.dev など）。⭕ `.env` の行はこのファイル名にしか一致しないので、
+# 別名の設定ファイルを置くと素通りしてコミットされる。
+.env.*
+!.env.*.example
 .envrc
 .venv
 env/
