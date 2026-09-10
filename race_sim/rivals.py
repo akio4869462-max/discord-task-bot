@@ -79,8 +79,8 @@ def _is_dirt_horse(horse):
     return horse['aptitude'].get('dirt') == 'A'
 
 
-def _distance_band(distance):
-    """適性辞書の距離区分。engine._distance_band と同じ区切りを使う。"""
+def distance_band(distance):
+    """適性辞書の距離区分。engine と同じ区切りを使う。"""
     if distance <= 1400:
         return 'sprint'
     if distance <= 1800:
@@ -103,7 +103,7 @@ def is_supported(race, pool=None, minimum=SUPPORT_MIN):
     """
     pool = pool or load_pool()
     want_dirt = race['surface'] == 'ダ'
-    band = _distance_band(race['distance'])
+    band = distance_band(race['distance'])
     cls = race.get('class', '1勝')
 
     n = sum(1 for h in pool['horses']
@@ -123,7 +123,7 @@ def pick_rivals(race, count, rng, pool=None, exclude=None):
     exclude = exclude or set()
     want_dirt = race['surface'] == 'ダ'
 
-    band = _distance_band(race['distance'])
+    band = distance_band(race['distance'])
 
     candidates, weights = [], []
     for h in pool['horses']:
