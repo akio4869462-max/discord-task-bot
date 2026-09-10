@@ -168,6 +168,28 @@ def test_activity_weights_sum_to_one():
         assert sum(weights.values()) == pytest.approx(1.0), category
 
 
+def test_realistic_week_does_not_leave_a_parameter_far_behind():
+    """⭕ 実際の1週（開発6h・インプット3h・筋トレ5回・タイピング5回）を4週続けたとき、
+       一番伸びる能力と一番伸びない能力の差が2倍を超えないこと。
+
+       開発作業は時間で記録されるのに対し筋トレ・タイピングは回数なので、換算値が
+       小さいとスタミナ・パワーだけ置いていかれる（15分相当だった頃は2.66倍あった）。
+       ACTIVITY_PARAMS の重みや換算値をいじったときに、この偏りが再発すると落ちる。"""
+    week = {
+        'programming': 6 * 60,
+        'reading': 3 * 60,
+        'training': 5 * hl.TRAINING_MINUTES,
+        'typing': 5 * hl.TYPING_MINUTES,
+    }
+    growth = {p: 0.0 for p in hl.PARAMS}
+    for category, minutes in week.items():
+        for param, share in hl.ACTIVITY_PARAMS[category].items():
+            growth[param] += minutes * share * 4
+
+    values = list(hl.derive_params(growth).values())
+    assert max(values) / min(values) < 2.0, hl.derive_params(growth)
+
+
 # ====================================================
 # あとから記録する
 # ====================================================
