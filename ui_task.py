@@ -18,10 +18,6 @@ class TaskCategorySelectView(View):
     async def programming_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TaskAddModal("programming"))
 
-    @discord.ui.button(label="📝 書類・面接", style=discord.ButtonStyle.primary)
-    async def document_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TaskAddModal("document"))
-
     @discord.ui.button(label="📚 インプット", style=discord.ButtonStyle.primary)
     async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TaskAddModal("reading"))
@@ -151,7 +147,6 @@ async def task_autocomplete(interaction: discord.Interaction, current: str):
 @app_commands.choices(
     category=[
         app_commands.Choice(name="💻 開発", value="programming"),
-        app_commands.Choice(name="📝 書類・面接", value="document"),
         app_commands.Choice(name="📚 インプット", value="reading"),
     ],
     priority=[

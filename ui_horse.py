@@ -6,21 +6,24 @@
 
 import asyncio
 import os
+import re
 import tempfile
+from datetime import date, datetime, time as dtime, timedelta, timezone
 
 import discord
 from discord import app_commands
 from discord.ui import View, Select
 
 import horse_logic
-from bot_state import FOCUS_TIMER_SECONDS, active_focus_timers, tree
+import training_logic
+import typing_logic
+from bot_state import FOCUS_TIMER_SECONDS, JST, active_focus_timers, tree
 from race_sim.tools import make_viewer
 from ui_common import parse_positive_int, build_growth_message
 
 # 作業報告のカテゴリ。表示名と、育つ能力の説明。
 WORK_CATEGORIES = [
     ('programming', '💻 開発作業', 'スピード'),
-    ('document', '📄 書類作成', '根性'),
     ('reading', '📚 インプット', '賢さ'),
 ]
 
@@ -110,6 +113,137 @@ class StableMenuView(View):
     @discord.ui.button(label="📜 戦績", style=discord.ButtonStyle.secondary, row=1)
     async def history_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(format_history(), ephemeral=True)
+
+    @discord.ui.button(label="⏪ あとから記録", style=discord.ButtonStyle.secondary, row=1)
+    async def backfill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "記録し忘れたぶんを、日付を指定して足せます。", view=BackfillView(), ephemeral=True)
+
+
+# ====================================================
+# あとから記録する
+# ====================================================
+# ⭕ やっているのに記録が残っていない状態を埋められるようにする。タイピングは
+#    機能追加から18日で記録1件、筋トレは0件だった。ボタンの押し忘れで能力が
+#    育たないのでは育成として成立しない。
+BACKFILL_CATEGORIES = [
+    ('programming', '💻 開発作業', True),
+    ('reading', '📚 インプット', True),
+    ('training', '💪 筋トレ', False),
+    ('typing', '⌨️ タイピング', False),
+]
+
+
+def parse_dates(text, today=None):
+    """「09-05, 9/6, 2026-09-08」のような入力を日付のリストにします。
+
+    Returns:
+        tuple: (日付のリスト, 読めなかった文字列のリスト)
+    """
+    today = today or datetime.now(JST).date()
+    parsed, bad = [], []
+    for chunk in re.split(r'[,、\s]+', (text or '').strip()):
+        if not chunk:
+            continue
+        parts = re.split(r'[-/.]', chunk)
+        try:
+            if len(parts) == 3:
+                day = date(int(parts[0]), int(parts[1]), int(parts[2]))
+            elif len(parts) == 2:
+                day = date(today.year, int(parts[0]), int(parts[1]))
+                # ⭕ 年をまたいだ直後に「12-28」と入れたら去年のこと。未来日にはしない。
+                if day > today:
+                    day = date(today.year - 1, int(parts[0]), int(parts[1]))
+            else:
+                bad.append(chunk)
+                continue
+        except ValueError:
+            bad.append(chunk)
+            continue
+        if day not in parsed:
+            parsed.append(day)
+    return sorted(parsed), bad
+
+
+class BackfillView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        for cat_id, label, needs_minutes in BACKFILL_CATEGORIES:
+            self.add_item(BackfillButton(cat_id, label, needs_minutes))
+
+
+class BackfillButton(discord.ui.Button):
+    def __init__(self, cat_id, label, needs_minutes):
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self.cat_id = cat_id
+        self.cat_label = label
+        self.needs_minutes = needs_minutes
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(
+            BackfillModal(self.cat_id, self.cat_label, self.needs_minutes))
+
+
+class BackfillModal(discord.ui.Modal):
+    def __init__(self, cat_id, cat_name, needs_minutes):
+        super().__init__(title=f"{cat_name}をあとから記録")
+        self.cat_id = cat_id
+        self.cat_name = cat_name
+        self.needs_minutes = needs_minutes
+
+        self.dates_input = discord.ui.TextInput(
+            label="日付（カンマ区切りで複数可）",
+            placeholder="例: 09-05, 09-06, 09-08",
+            required=True, max_length=200)
+        self.add_item(self.dates_input)
+
+        if needs_minutes:
+            self.minutes_input = discord.ui.TextInput(
+                label="1日あたりの時間（分）", placeholder="例: 60", required=True, max_length=4)
+            self.add_item(self.minutes_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        dates, bad = parse_dates(self.dates_input.value)
+        if not dates:
+            await interaction.response.send_message(
+                "⚠️ 日付を読み取れませんでした。`09-05, 09-06` のように入力してください。",
+                ephemeral=True)
+            return
+
+        minutes = None
+        if self.needs_minutes:
+            minutes = parse_positive_int(self.minutes_input.value)
+            if minutes is None or minutes <= 0:
+                await interaction.response.send_message(
+                    "⚠️ 分数は正の数字で入力してください。", ephemeral=True)
+                return
+
+        result = horse_logic.backfill(self.cat_id, dates, minutes)
+        _record_sessions(self.cat_id, dates)
+
+        detail, public = build_growth_message(result)
+        listed = '、'.join(d.strftime('%m/%d') for d in dates)
+        msg = f"✅ {self.cat_name} を{result['days']}日ぶん記録しました（{listed}）。{detail}"
+        if bad:
+            msg += f"\n⚠️ 読み取れなかった入力: {', '.join(bad)}"
+        await interaction.response.send_message(msg, ephemeral=True)
+        if public:
+            await interaction.channel.send(f"📣 {interaction.user.mention} {public}")
+
+
+def _record_sessions(category, dates):
+    """筋トレ・タイピングは、それぞれの記録側にも同じ日付で残します。
+
+    ⭕ 馬の成長だけ足して元の記録を放置すると、連続記録や週間の実施率が食い違う。
+    """
+    for day in dates:
+        try:
+            if category == 'training':
+                training_logic.log_session(now=datetime.combine(day, dtime(12, 0, tzinfo=JST)))
+            elif category == 'typing':
+                typing_logic.log_practice(today=day)
+        except Exception as e:      # 記録側の都合で育成まで巻き込まないようにする
+            print(f"⚠️ [backfill] {category} {day} の記録に失敗: {e}")
 
 
 # ====================================================

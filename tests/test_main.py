@@ -129,12 +129,14 @@ def isolated_db(tmp_path, monkeypatch):
 def test_process_exam_completion_trains_wit():
     detail, _ = main.process_exam_completion(total=20)  # 20問 × 1.5分 = 30分
     assert '賢さ' in detail
-    assert horse_logic.load_stable()['current']['growth']['wit'] == 30
+    share = horse_logic.ACTIVITY_PARAMS['reading']['wit']
+    assert horse_logic.load_stable()['current']['growth']['wit'] == 30 * share
 
 
 def test_process_exam_completion_uses_rounded_minutes():
     main.process_exam_completion(total=3)   # 3問 × 1.5分 = 4.5分 → 4分か5分に丸め
-    assert horse_logic.load_stable()['current']['growth']['wit'] in (4, 5)
+    share = horse_logic.ACTIVITY_PARAMS['reading']['wit']
+    assert horse_logic.load_stable()['current']['growth']['wit'] in (4 * share, 5 * share)
 
 
 def test_process_exam_completion_zero_questions_trains_nothing():
@@ -148,7 +150,8 @@ def test_process_task_completion_trains_the_matching_parameter():
     detail, _ = main.process_task_completion('programming')
     assert 'スピード' in detail
     growth = horse_logic.load_stable()['current']['growth']
-    assert growth['speed'] == bot_state.TASK_COMPLETE_MINUTES
+    share = horse_logic.ACTIVITY_PARAMS['programming']['speed']
+    assert growth['speed'] == bot_state.TASK_COMPLETE_MINUTES * share
 
 
 def test_process_task_completion_without_a_category_does_nothing():

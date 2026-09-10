@@ -117,7 +117,8 @@ def test_save_and_reload_round_trips():
     data = hl.load_stable(TODAY)
     hl.add_growth('programming', 120, today=TODAY, data=data)
     reloaded = hl.load_stable(TODAY)
-    assert reloaded['current']['growth']['speed'] == 120
+    share = hl.ACTIVITY_PARAMS['programming']['speed']
+    assert reloaded['current']['growth']['speed'] == 120 * share
 
 
 # ====================================================
@@ -137,16 +138,83 @@ def test_training_and_typing_are_counted_as_sessions():
     data = hl.load_stable(TODAY)
     hl.log_training(today=TODAY, data=data, save=False)
     hl.log_typing(today=TODAY, data=data, save=False)
-    assert data['current']['growth']['stamina'] == hl.TRAINING_MINUTES / 2
-    assert data['current']['growth']['power'] == hl.TRAINING_MINUTES / 2
-    assert data['current']['growth']['dash'] == hl.TYPING_MINUTES
+    growth = data['current']['growth']
+    assert growth['stamina'] == hl.TRAINING_MINUTES * hl.ACTIVITY_PARAMS['training']['stamina']
+    assert growth['power'] == hl.TRAINING_MINUTES * hl.ACTIVITY_PARAMS['training']['power']
+    assert growth['dash'] == hl.TYPING_MINUTES * hl.ACTIVITY_PARAMS['typing']['dash']
 
 
 def test_add_growth_reports_what_went_up():
     data = hl.load_stable(TODAY)
     result = hl.add_growth('programming', 120, today=TODAY, data=data, save=False)
-    assert set(result['gains']) == {'speed'}
-    assert result['gains']['speed'] > 0
+    assert set(result['gains']) == set(hl.ACTIVITY_PARAMS['programming'])
+    assert all(v > 0 for v in result['gains'].values())
+
+
+def test_every_parameter_has_at_least_one_source():
+    """⭕ 供給源の無い能力があると、その能力は140のまま張り付く。書類作成を廃止した
+       ときに根性がこの状態になった。"""
+    fed = set()
+    for category, weights in hl.ACTIVITY_PARAMS.items():
+        if category == 'document':      # 廃止済み。古いタスク用に残しているだけ
+            continue
+        fed |= set(weights)
+    assert fed == set(hl.PARAMS), f"供給源が無い能力: {set(hl.PARAMS) - fed}"
+
+
+def test_activity_weights_sum_to_one():
+    """配分の合計が1でないと、活動によって1分の価値が変わってしまう。"""
+    for category, weights in hl.ACTIVITY_PARAMS.items():
+        assert sum(weights.values()) == pytest.approx(1.0), category
+
+
+# ====================================================
+# あとから記録する
+# ====================================================
+def test_backfill_adds_several_days_at_once():
+    data = hl.load_stable(TODAY)
+    days = [date(2026, 9, d) for d in (5, 6, 8)]
+    result = hl.backfill('typing', days, data=data, save=False)
+
+    assert result['days'] == 3
+    expected = hl.TYPING_MINUTES * 3 * hl.ACTIVITY_PARAMS['typing']['dash']
+    assert data['current']['growth']['dash'] == pytest.approx(expected)
+
+
+def test_backfill_takes_minutes_for_timed_activities():
+    data = hl.load_stable(TODAY)
+    hl.backfill('programming', [date(2026, 9, 5), date(2026, 9, 6)], minutes=90,
+                data=data, save=False)
+    share = hl.ACTIVITY_PARAMS['programming']['speed']
+    assert data['current']['growth']['speed'] == pytest.approx(180 * share)
+
+
+def test_backfill_does_not_touch_the_streak():
+    """⭕ 連続記録は「今日やったか」の指標。昔の日を足しても伸ばしてはいけないし、
+       last_active_date を過去に巻き戻してもいけない。"""
+    data = hl.load_stable(TODAY)
+    hl.add_growth('programming', 30, today=TODAY, data=data, save=False)
+    before_streak = data['current_streak']
+    before_date = data['last_active_date']
+
+    hl.backfill('typing', [date(2026, 8, 1), date(2026, 8, 2)], data=data, save=False)
+
+    assert data['current_streak'] == before_streak
+    assert data['last_active_date'] == before_date
+
+
+def test_backfill_ignores_empty_input():
+    data = hl.load_stable(TODAY)
+    result = hl.backfill('typing', [], data=data, save=False)
+    assert result['days'] == 0 and result['gains'] == {}
+    assert hl.total_minutes(data['current']['growth']) == 0
+
+
+def test_backfill_is_capped_per_call():
+    data = hl.load_stable(TODAY)
+    days = [date(2026, 8, d) for d in range(1, 25)]
+    result = hl.backfill('typing', days, data=data, save=False)
+    assert result['days'] == hl.BACKFILL_MAX_DATES
 
 
 def test_unknown_category_changes_nothing():

@@ -46,15 +46,19 @@ PARAM_NAMES = {
 }
 
 # 活動 → どの能力に何割入るか
+# ⭕ 1つの活動が複数の能力を育てる形にしている。入口は4つしかないので、
+#    1活動＝1能力にすると供給源の無い能力が出る（書類を廃止して根性が浮いた）。
 ACTIVITY_PARAMS = {
-    'programming': {'speed': 1.0},          # 💻 開発作業・集中タイマー
-    'document': {'guts': 1.0},              # 📄 書類作成
-    'reading': {'wit': 1.0},                # 📚 インプット・過去問演習
+    'programming': {'speed': 0.6, 'guts': 0.4},   # 💻 開発作業・集中タイマー
+    'reading': {'wit': 0.7, 'guts': 0.3},         # 📚 インプット・過去問演習
     'training': {'stamina': 0.5, 'power': 0.5},   # 💪 筋トレ
-    'typing': {'dash': 1.0},                # ⌨️ タイピング訓練
+    'typing': {'dash': 0.7, 'speed': 0.3},        # ⌨️ タイピング訓練
+    # ⭕ 旧・就活RPGの「書類作成」。UIからは消したが、古いタスクが完了されたときに
+    #    落ちないよう対応だけ残す。
+    'document': {'guts': 1.0},
 }
 # ⭕ 筋トレとタイピングは実施日しか記録していない（分を持たない）ので回数で換算する。
-TRAINING_MINUTES = 30
+TRAINING_MINUTES = 15
 TYPING_MINUTES = 15
 
 RETIRE_STARTS = 20          # 何戦で引退するか
@@ -269,13 +273,17 @@ CONDITION_LABELS = {2: '絶好調', 1: '好調', 0: '平常', -1: 'やや不調'
 # ====================================================
 # 成長
 # ====================================================
-def add_growth(category, minutes, today=None, data=None, save=True):
+def add_growth(category, minutes, today=None, data=None, save=True, update_streak=True):
     """活動を記録して馬を成長させます。
 
     Args:
         category (str): ACTIVITY_PARAMS のキー。
         minutes (float): 活動時間（分）。
         today (date): 基準日（省略時は今日。テスト用の注入口）。
+        update_streak (bool): 連続記録を更新するか。
+            ⭕ 過去の日をあとから記録するとき（backfill）は False。連続記録は
+               「今日やったか」の指標なので、昔の日を足しても伸ばしてはいけないし、
+               last_active_date を過去に巻き戻してもいけない。
 
     Returns:
         dict: {'gains': {能力: 上がった値}, 'streak': int, 'condition': int,
@@ -296,7 +304,7 @@ def add_growth(category, minutes, today=None, data=None, save=True):
     after = derive_params(horse['growth'])
 
     gains = {p: after[p] - before[p] for p in PARAMS if after[p] != before[p]}
-    streak = _update_streak(data, today)
+    streak = _update_streak(data, today) if update_streak else data.get('current_streak', 0)
     capped = any(after[p] >= ABILITY_CAP for p in weights)
 
     if save:
@@ -305,14 +313,58 @@ def add_growth(category, minutes, today=None, data=None, save=True):
             'capped': capped, 'horse': horse}
 
 
-def log_training(today=None, data=None, save=True):
+def log_training(today=None, data=None, save=True, update_streak=True):
     """筋トレ1セッション。⭕ 時間を記録していないので回数で換算する。"""
-    return add_growth('training', TRAINING_MINUTES, today=today, data=data, save=save)
+    return add_growth('training', TRAINING_MINUTES, today=today, data=data,
+                      save=save, update_streak=update_streak)
 
 
-def log_typing(today=None, data=None, save=True):
+def log_typing(today=None, data=None, save=True, update_streak=True):
     """タイピング1ドリル。同じく回数で換算する。"""
-    return add_growth('typing', TYPING_MINUTES, today=today, data=data, save=save)
+    return add_growth('typing', TYPING_MINUTES, today=today, data=data,
+                      save=save, update_streak=update_streak)
+
+
+# 1回の「あとから記録」で受け付ける日付の数
+BACKFILL_MAX_DATES = 14
+
+
+def backfill(category, dates, minutes=None, data=None, save=True):
+    """過去の日ぶんの活動をまとめて記録します。
+
+    ⭕ やっているのに記録が残っていない、という状態を後から埋められるようにする。
+       タイピングは機能追加から18日で記録1件、筋トレは0件だった。ボタンを押し忘れる
+       だけで能力が育たないのでは、育成として成立しない。
+
+    Args:
+        category (str): ACTIVITY_PARAMS のキー。
+        dates (list): 対象の日付（date のリスト）。
+        minutes (float): 1日あたりの分数。筋トレ・タイピングは省略時に既定値を使う。
+
+    Returns:
+        dict: add_growth と同じ形。gains は全日ぶんの合計。
+    """
+    data = data if data is not None else load_stable()
+    if minutes is None:
+        minutes = {'training': TRAINING_MINUTES, 'typing': TYPING_MINUTES}.get(category)
+    if not minutes or not dates:
+        return {'gains': {}, 'streak': data.get('current_streak', 0),
+                'condition': condition_of(data), 'capped': False,
+                'horse': data['current'], 'days': 0}
+
+    before = derive_params(data['current']['growth'])
+    result = None
+    for day in dates[:BACKFILL_MAX_DATES]:
+        result = add_growth(category, minutes, today=day, data=data,
+                            save=False, update_streak=False)
+    after = derive_params(data['current']['growth'])
+
+    if save:
+        save_stable(data)
+    result = result or {}
+    result['gains'] = {p: after[p] - before[p] for p in PARAMS if after[p] != before[p]}
+    result['days'] = len(dates[:BACKFILL_MAX_DATES])
+    return result
 
 
 # ====================================================
