@@ -270,7 +270,11 @@ def build_replay_file(result):
 
 
 async def post_race_result(channel, outcome, mention=None):
-    """レース結果をチャンネルへ投稿し、再生用HTMLを添付します。"""
+    """レース結果をチャンネルへ投稿し、再生用HTMLを添付します。
+
+    ⭕ 添付にはファイル添付の権限が要る。権限が無いときに全体が落ちると、レース結果
+       そのものが失われてしまうので、そのときはテキストだけでも必ず投稿する。
+    """
     text = horse_logic.format_result(outcome)
     if mention:
         text = f"{mention}\n{text}"
@@ -278,6 +282,9 @@ async def post_race_result(channel, outcome, mention=None):
     path, name = await asyncio.to_thread(build_replay_file, outcome['result'])
     try:
         await channel.send(text, file=discord.File(path, filename=name))
+    except discord.Forbidden:
+        await channel.send(text + "\n（再生用HTMLを添付できませんでした。"
+                                  "Botに「ファイルを添付」の権限がありません）")
     finally:
         try:
             os.remove(path)
