@@ -291,6 +291,52 @@
   const MAX_TIME = Math.max.apply(null, HORSES.map(function (h) { return h.time; }));
   const PACE_LABEL = DATA.pace > 0.15 ? 'ハイペース' : (DATA.pace < -0.15 ? 'スローペース' : '平均ペース');
 
+  // ====================================================
+  // コース形状
+  // ====================================================
+  // 実際のJRA各競馬場の「回り」「ゴール前直線」「1周距離」（芝）。
+  // 内回り・外回りがある競馬場は代表して1つを使う。
+  const COURSES = {
+    '札幌': { turn: 1, straight: 266.1, lap: 1640.9 },
+    '函館': { turn: 1, straight: 262.1, lap: 1626.6 },
+    '福島': { turn: 1, straight: 292.0, lap: 1600.0 },
+    '新潟': { turn: -1, straight: 358.7, lap: 1623.0 },
+    '東京': { turn: -1, straight: 525.9, lap: 2083.1 },
+    '中山': { turn: 1, straight: 310.0, lap: 1667.1 },
+    '中京': { turn: -1, straight: 412.5, lap: 1705.9 },
+    '京都': { turn: 1, straight: 328.4, lap: 1782.8 },
+    '阪神': { turn: 1, straight: 356.5, lap: 1689.0 },
+    '小倉': { turn: 1, straight: 293.0, lap: 1615.1 }
+  };
+  const COURSE = COURSES[RACE.course] || COURSES['東京'];
+
+  // ⭕ 楕円は「直線2本 ＋ 半円のコーナー2つ」で近似する。1周距離と直線の長さが
+  //    分かればコーナーの半径が決まる。レースは必ずゴール（ホームストレッチの終点）で
+  //    終わるので、距離を逆算すればスタート位置が決まり、道中でコーナーを回って
+  //    最後に直線を向く、という競馬の形になる。
+  const LAP = COURSE.lap;
+  const HOME = COURSE.straight;
+  const RADIUS = Math.max(60, (LAP - 2 * HOME) / (2 * Math.PI));
+  const TURN_LEN = Math.PI * RADIUS;
+  const TURN_SIGN = COURSE.turn;                 // +1=右回り, -1=左回り
+  // 新潟の芝1000mだけは日本唯一の直線コース。
+  const STRAIGHT_ONLY = RACE.course === '新潟' && !IS_DIRT && DISTANCE <= 1000;
+
+  /** ゴールまで残り u メートルの地点の曲率（1/半径）。右回りなら正。 */
+  function curvatureAt(u) {
+    if (STRAIGHT_ONLY) return 0;
+    let x = ((u % LAP) + LAP) % LAP;
+    if (x < HOME) return 0;                       // ホームストレッチ
+    x -= HOME;
+    if (x < TURN_LEN) return TURN_SIGN / RADIUS;  // 3〜4コーナー
+    x -= TURN_LEN;
+    if (x < HOME) return 0;                       // 向正面
+    return TURN_SIGN / RADIUS;                    // 1〜2コーナー
+  }
+
+  /** 走路の内側はどちら側か。右回りなら画面の右が内。 */
+  const INNER = TURN_SIGN;
+
   /** その時刻に何メートル地点にいるか。区間の中は等速とみなして補間する。 */
   function distanceAt(h, t) {
     if (t >= h.time) return DISTANCE;
@@ -319,24 +365,48 @@
   const CAM_LAT = -7;
   const HORIZON_Y = H * 0.30;
   const TRACK_W = 24;          // 走路の幅(m)
-  const CURVE = 0.0016;        // 走路の曲がり。奥ほど横にずれる
   const STRIDE_M = 7.0;        // ひと完歩で進む距離
 
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  /** 走路上の点(距離d, 横位置lat[m]) を画面座標へ落とす。 */
+  // ⭕ 走路の曲がりは「カメラから先の曲率を2回積分した横ずれ」で表す。コーナーでは
+  //    走路が横へ流れ、直線に入ると正面を向く。毎フレーム、前方440mぶんを刻んで作る。
+  const BEND_STEP = 4, BEND_STEPS = 112;
+  let bendTable = [0];
+
+  function buildBend(camD) {
+    let heading = 0, offset = 0;
+    bendTable = [0];
+    for (let i = 0; i < BEND_STEPS; i++) {
+      heading += curvatureAt(DISTANCE - (camD + i * BEND_STEP)) * BEND_STEP;
+      offset += heading * BEND_STEP;
+      bendTable.push(offset);
+    }
+  }
+
+  function bendAt(depth) {
+    const f = depth / BEND_STEP;
+    const i = Math.max(0, Math.min(BEND_STEPS - 1, Math.floor(f)));
+    return bendTable[i] + (bendTable[i + 1] - bendTable[i]) * (f - i);
+  }
+
+  /** 走路上の点(距離d, 横位置lat[m]) を画面座標へ落とす。latは正が画面右。 */
   function project(d, lat, camD) {
     const depth = d - camD;
     if (depth <= 1.2) return null;
     const k = FOCAL / depth;
-    const bend = CURVE * depth * depth;
-    return { x: W / 2 + (lat - CAM_LAT + bend) * k, y: HORIZON_Y + CAM_HEIGHT * k, k: k, depth: depth };
+    return {
+      x: W / 2 + (lat - CAM_LAT + bendAt(depth)) * k,
+      y: HORIZON_Y + CAM_HEIGHT * k, k: k, depth: depth
+    };
   }
 
+  /** ⭕ 馬番1が最内。内側は右回りなら画面の右、左回りなら左になる。 */
   function laneLat(lane) {
-    return -TRACK_W / 2 + 1.6 + (TRACK_W - 3.2) * (N > 1 ? lane / (N - 1) : 0.5);
+    const f = N > 1 ? lane / (N - 1) : 0.5;
+    return INNER * (TRACK_W / 2 - 1.6) * (1 - 2 * f);
   }
 
   // ---- 空・遠景 ----
@@ -389,6 +459,9 @@
       const a = project(d, -TRACK_W / 2, camD), b = project(d + band, -TRACK_W / 2, camD);
       const c = project(d + band, TRACK_W / 2, camD), e = project(d, TRACK_W / 2, camD);
       if (!a || !b || !c || !e) continue;
+      // ⭕ コーナーでは走路が横へ流れ、遠方は画面外へ出ていく。実際の中継でも
+      //    コーナーの先は見えないので、外れたところで描くのをやめる。
+      if (Math.abs(a.x - W / 2) > W * 1.5) break;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y);
       ctx.closePath(); ctx.fill();
@@ -403,6 +476,7 @@
     for (let d = camD + 2; d < camD + 420; d += 6) {
       const p = project(d, lat, camD);
       if (!p) continue;
+      if (Math.abs(p.x - W / 2) > W * 1.5) break;
       const top = p.y - 1.15 * p.k;         // ラチの高さ 1.15m
       if (!started) { ctx.moveTo(p.x, top); started = true; } else ctx.lineTo(p.x, top);
     }
@@ -414,6 +488,7 @@
     for (let d = first; d < camD + 400; d += step) {
       const p = project(d, lat, camD);
       if (!p) continue;
+      if (Math.abs(p.x - W / 2) > W * 1.5) break;
       ctx.fillRect(p.x - 0.09 * p.k, p.y - 1.15 * p.k, 0.18 * p.k, 1.15 * p.k);
     }
   }
@@ -423,7 +498,7 @@
     const step = 45;
     const first = Math.floor(camD / step) * step;
     for (let d = first + step * 8; d > camD + 6; d -= step) {
-      const p = project(d, TRACK_W / 2 + 14, camD);
+      const p = project(d, -INNER * (TRACK_W / 2 + 14), camD);
       // ⭕ 近すぎる木は巨大になって走路に生えて見えるので描かない。
       if (!p || p.depth < 26 || p.x < -200 || p.x > W + 200) continue;
       const th = 5.5 * p.k;
@@ -570,10 +645,82 @@
     }
   }
 
+  // ---- コースの全体図 ----
+  /** ゴールまで残りuメートルの地点を、真上から見た座標(m)で返す。 */
+  function ovalPoint(u) {
+    let x = ((u % LAP) + LAP) % LAP, px, py;
+    if (x < HOME) { px = HOME - x; py = 0; }
+    else if (x < HOME + TURN_LEN) {
+      const th = (x - HOME) / RADIUS;
+      px = -RADIUS * Math.sin(th); py = RADIUS - RADIUS * Math.cos(th);
+    } else if (x < 2 * HOME + TURN_LEN) { px = x - HOME - TURN_LEN; py = 2 * RADIUS; }
+    else {
+      const ph = (x - 2 * HOME - TURN_LEN) / RADIUS;
+      px = HOME + RADIUS * Math.sin(ph); py = RADIUS + RADIUS * Math.cos(ph);
+    }
+    // ⭕ この式は左回りの形。右回りの競馬場は左右を反転させる。
+    return { x: TURN_SIGN > 0 ? HOME - px : px, y: py };
+  }
+
+  function drawCourseMap(leadD, playerD) {
+    const boxW = W * 0.19, boxH = boxW * 0.62;
+    const bx = W - boxW - W * 0.025, by = H - boxH - H * 0.16;
+
+    ctx.fillStyle = 'rgba(12,20,15,.62)';
+    ctx.fillRect(bx - 10, by - 10, boxW + 20, boxH + 26);
+
+    const spanX = HOME + 2 * RADIUS, spanY = 2 * RADIUS;
+    const sc = Math.min(boxW / spanX, boxH / spanY) * 0.88;
+    const ox = bx + boxW / 2, oy = by + boxH / 2;
+    function toScreen(p) {
+      return { x: ox + (p.x - HOME / 2) * sc, y: oy + (p.y - RADIUS) * sc };
+    }
+
+    if (STRAIGHT_ONLY) {
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(bx + 8, oy); ctx.lineTo(bx + boxW - 8, oy); ctx.stroke();
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,.5)';
+      ctx.lineWidth = Math.max(2, boxW * 0.022);
+      ctx.beginPath();
+      for (let u = 0; u <= LAP; u += LAP / 160) {
+        const p = toScreen(ovalPoint(u));
+        if (u === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath(); ctx.stroke();
+    }
+
+    // ゴール板
+    const g = toScreen(ovalPoint(0));
+    ctx.fillStyle = '#e8402c';
+    ctx.fillRect(g.x - 3, g.y - 6, 6, 12);
+
+    // 馬群（先頭と自分の馬）
+    function dot(d, color, r) {
+      if (STRAIGHT_ONLY) {
+        const f = 1 - (DISTANCE - d) / DISTANCE;
+        const x = bx + 8 + (boxW - 16) * f;
+        ctx.beginPath(); ctx.arc(x, oy, r, 0, Math.PI * 2);
+      } else {
+        const p = toScreen(ovalPoint(DISTANCE - d));
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = color; ctx.fill();
+    }
+    dot(leadD, '#ffffff', Math.max(3, boxW * 0.026));
+    if (playerD !== null) dot(playerD, '#ffd45e', Math.max(4, boxW * 0.032));
+
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.font = '500 ' + Math.round(boxW * 0.1) + 'px "Roboto Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(RACE.course + ' ' + (TURN_SIGN > 0 ? '右回り' : '左回り'), bx + boxW / 2, by + boxH + 12);
+  }
+
   function drawChase(t, positions, ranked) {
     const tail = Math.min.apply(null, positions);
     const camD = tail - CAM_BACK;
 
+    buildBend(camD);
     drawSky(camD);
     drawGround(camD);
 
@@ -585,17 +732,19 @@
     drawable.forEach(function (o) {
       const p = project(o.d, o.lat, camD);
       if (!p || p.x < -260 || p.x > W + 260) return;
-      const bend = CURVE * p.depth * p.depth;
-
       ctx.beginPath();                                // 影
       ctx.ellipse(p.x, p.y + 0.1 * p.k, 0.95 * p.k, 0.28 * p.k, 0, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(0,0,0,.28)';
       ctx.fill();
 
-      drawHorseRear(p, o.h, (o.d / STRIDE_M) * Math.PI * 2, o.lat - CAM_LAT + bend);
+      drawHorseRear(p, o.h, (o.d / STRIDE_M) * Math.PI * 2, o.lat - CAM_LAT + bendAt(p.depth));
       // ⭕ 上位3頭に名前を出すと、先頭が団子になったとき文字が重なって潰れる。
       drawTag(p, o.h, o.h.is_player || o.h.currentPos === 1);
     });
+
+    const mine = HORSES.filter(function (h) { return h.is_player; })[0];
+    drawCourseMap(Math.max.apply(null, positions),
+                  mine ? positions[HORSES.indexOf(mine)] : null);
   }
 
   // ====================================================
