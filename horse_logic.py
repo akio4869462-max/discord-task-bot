@@ -565,6 +565,56 @@ def format_horse(data=None, today=None):
     return '\n'.join(lines)
 
 
+def format_race_day_notice(data=None, today=None):
+    """開催日の朝に出す告知。開催日でなければ None を返します。
+
+    ⭕ レースは20:00に自動で走るが、出走登録が無いと何も言われずに開催日が過ぎる。
+       朝のうちに気づけるよう、登録の有無で文言を変えて出す。
+    """
+    today = today or datetime.now(JST).date()
+    if not race_calendar.is_race_day(today):
+        return None
+
+    data = data if data is not None else load_stable()
+    horse = data['current']
+    cond = condition_of(data, today)
+    entry = horse.get('entry')
+
+    header = f"🏁 **今日は開催日（{today.isoformat()}）**"
+    state = (f"🐎 {horse['name']}（{horse['class']}）"
+             f" 調子: {CONDITION_LABELS.get(cond, '平常')}"
+             f" ／ 脚質: {horse.get('style', '差し')}")
+
+    if entry:
+        # ⭕ run_entry() は登録の日付を見ないので、前回走り損なった登録は今夜そのまま走る。
+        #    黙って古いレースを走らせると面食らうので、今日のものでなければそう言う。
+        if entry.get('date') != today.isoformat():
+            return '\n'.join([
+                header, state,
+                f"📋 登録は **{entry['date']} {entry['name']}** のままです。"
+                f"今夜20:00にはこのレースが走ります。"
+                f"今日の番組から選び直すなら、厩舎で登録を取り直してください。",
+            ])
+        grade = f" [{entry['grade']}]" if entry.get('grade') else ''
+        return '\n'.join([
+            header, state,
+            f"📋 **{entry['name']}**{grade} "
+            f"{entry['course']}{entry['surface']}{entry['distance']}m {entry['cond']}"
+            f" ／ 1着 {entry['prize']:,}万円",
+            "→ **20:00に発走**します。それまでに記録した分は調教に間に合います。",
+        ])
+
+    day, races = available_races(data=data, on=today)
+    lines = [header, state,
+             "⚠️ **出走登録がありません。** 20:00までに登録しないと今日は走りません。"]
+    if races:
+        lines.append('')
+        lines.append(format_races(day, races))
+    lines.append('')
+    lines.append("厩舎メニューの「🏇 出走登録」か `/entry` から登録できます。")
+    return '\n'.join(lines)
+
+
 def get_weekly_summary(data=None, today=None, save=True):
     """週間サマリー。前回からの差分を出し、次回のためのスナップショットを更新します。"""
     data = data if data is not None else load_stable()

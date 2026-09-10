@@ -110,6 +110,13 @@ async def xml_news_delivery_task():
         if task_channel is not None:
             await send_training_notification(task_channel)
 
+        # 🏁 開催日の朝は、出走登録の有無を知らせる
+        # ⭕ レース自体は20:00に自動で走るので、ここは「登録し忘れに気づく」ためだけにある。
+        if task_channel is not None:
+            notice = horse_logic.format_race_day_notice(today=now_jst.date())
+            if notice:
+                await task_channel.send(notice)
+
         # 📅 月曜朝は週間サマリーも配信
         if task_channel is not None and now_jst.weekday() == 0:
             summary_msg = horse_logic.get_weekly_summary()
@@ -238,6 +245,12 @@ async def test_reminder_command(interaction: discord.Interaction):
 
     if task_channel:
         await send_training_notification(task_channel)
+
+    # 🏁 開催日かどうかに関わらず、開催日の告知もテスト発火できるようにする
+    if task_channel:
+        notice = horse_logic.format_race_day_notice(
+            today=race_calendar.next_race_day(datetime.now(JST).date()))
+        await task_channel.send(f"🧪 **【デバッグ】開催日の朝の告知**\n{notice}")
 
     # 曜日に関わらず、週間サマリーもテスト発火できるようにする
     if task_channel:

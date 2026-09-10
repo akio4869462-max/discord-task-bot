@@ -508,3 +508,49 @@ def test_format_result_is_plain_by_default():
     """CLIから呼ぶときは伏せない（ターミナルでは `||` がただの文字になる）。"""
     _, _, out = raced()
     assert '||' not in hl.format_result(out)
+
+
+# ====================================================
+# 開催日の朝の告知
+# ====================================================
+def test_race_day_notice_is_silent_on_a_non_race_day():
+    """開催日以外は何も出さない（毎朝うるさくしない）。"""
+    assert hl.format_race_day_notice(today=TODAY) is None
+
+
+def test_race_day_notice_warns_when_nothing_is_entered():
+    """⭕ レースは20:00に自動で走るので、登録忘れに気づく手段がこれしか無い。"""
+    data = grown(hl.load_stable(TODAY), 12)
+    text = hl.format_race_day_notice(data=data, today=RACE_DAY)
+
+    assert '出走登録がありません' in text
+    assert '20:00' in text
+    _, races = hl.available_races(data, on=RACE_DAY)
+    assert races[0]['name'] in text          # その日の番組表も一緒に出す
+
+
+def test_race_day_notice_confirms_the_entry():
+    data = grown(hl.load_stable(TODAY), 12)
+    _, races = hl.available_races(data, on=RACE_DAY)
+    hl.enter_race(races[0], data=data, save=False)
+
+    text = hl.format_race_day_notice(data=data, today=RACE_DAY)
+
+    assert races[0]['name'] in text
+    assert '出走登録がありません' not in text
+    assert '20:00' in text
+
+
+def test_race_day_notice_flags_an_entry_left_over_from_another_day():
+    """⭕ run_entry() は登録の日付を見ないので、Botが落ちて走り損なった登録は
+       今夜そのまま古いレースとして走る。黙ってそうなると面食らうので告知する。"""
+    data = grown(hl.load_stable(TODAY), 12)
+    _, races = hl.available_races(data, on=RACE_DAY)
+    stale = dict(races[0], date='2026-09-09')
+    hl.enter_race(stale, data=data, save=False)
+
+    text = hl.format_race_day_notice(data=data, today=RACE_DAY)
+
+    assert '2026-09-09' in text
+    assert '取り直して' in text
+    assert '今夜20:00' in text       # 黙って消えるのではなく、それが走ると伝える
