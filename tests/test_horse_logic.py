@@ -371,11 +371,50 @@ def test_format_races_handles_an_empty_day():
     assert '出走できるレースがありません' in hl.format_races(RACE_DAY, [])
 
 
-def test_format_result_reports_the_finish():
-    data = grown(hl.load_stable(TODAY), 12)
+def raced(hours=12):
+    """1レース走らせて結果を返す。"""
+    data = grown(hl.load_stable(TODAY), hours)
     _, races = hl.available_races(data, on=TODAY)
     hl.enter_race(races[0], data=data, save=False)
-    out = hl.run_entry(data=data, today=RACE_DAY, save=False)
+    return data, races[0], hl.run_entry(data=data, today=RACE_DAY, save=False)
+
+
+def test_format_result_reports_the_finish():
+    data, race, out = raced()
     text = hl.format_result(out)
-    assert f"{out['finish']}着" in text
-    assert races[0]['name'] in text
+
+    assert race['name'] in text
+    assert data['current']['name'] in text          # 自分の馬が着順表にいる
+    assert '★' in text                               # 自分の馬に印が付く
+    if out['finish'] == 1:
+        assert '勝ちました' in text
+    else:
+        assert f"{out['finish']}着" in text
+
+
+def test_format_result_always_shows_my_horse_even_when_beaten():
+    """⭕ 上位5頭だけだと、大敗したとき自分の行が消えて結果が分からない。"""
+    _, _, out = raced()
+    me = next(h for h in out['result']['horses'] if h['is_player'])
+    me['finish'] = 12                                # 大敗したことにする
+    out['finish'] = 12
+    text = hl.format_result(out)
+    assert '★' in text and '12着' in text
+
+
+def test_format_result_can_hide_the_outcome():
+    """Discordのネタバレ（||…||）で結果だけ伏せられること。"""
+    _, race, out = raced()
+    hidden = hl.format_result(out, spoiler=True)
+
+    # レース名は見えたまま、結果はネタバレの中
+    head, body = hl.format_result_parts(out)
+    assert hidden.startswith(head)
+    assert f"||{body}||" in hidden
+    assert race['name'] not in body                  # 見出しに結果は含まれない
+
+
+def test_format_result_is_plain_by_default():
+    """CLIから呼ぶときは伏せない（ターミナルでは `||` がただの文字になる）。"""
+    _, _, out = raced()
+    assert '||' not in hl.format_result(out)

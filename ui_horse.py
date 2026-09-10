@@ -265,7 +265,9 @@ def build_replay_file(result):
     fd, path = tempfile.mkstemp(suffix='.html', prefix='race_')
     with os.fdopen(fd, 'w', encoding='utf-8') as f:
         f.write(html)
-    name = f"{result['race'].get('name', 'race')}.html"
+    # ⭕ ファイル名を SPOILER_ で始めると Discord が黒塗りで表示する。
+    #    結果を先に見せずに済む。
+    name = f"SPOILER_{result['race'].get('name', 'race')}.html"
     return path, name
 
 
@@ -275,7 +277,9 @@ async def post_race_result(channel, outcome, mention=None):
     ⭕ 添付にはファイル添付の権限が要る。権限が無いときに全体が落ちると、レース結果
        そのものが失われてしまうので、そのときはテキストだけでも必ず投稿する。
     """
-    text = horse_logic.format_result(outcome)
+    # ⭕ 結果はネタバレで伏せる。開いた瞬間に着順が見えると、再生を先に見る
+    #    楽しみが無くなる。タップすれば読める。
+    text = horse_logic.format_result(outcome, spoiler=True)
     if mention:
         text = f"{mention}\n{text}"
 

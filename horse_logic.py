@@ -561,12 +561,30 @@ def format_races(day, races):
 RESULT_ROWS = 5     # 着順表に載せる上位の頭数
 
 
-def format_result(entry_result, rows=RESULT_ROWS):
+def format_result(entry_result, rows=RESULT_ROWS, spoiler=False):
     """レース結果を整形します。
 
     ⭕ メッセージ単体で何が起きたか分かるようにする。再生用HTMLは添付するが、
        スマホのDiscordでは添付を開くのが面倒なうえ、開かないと着順が分からない
        のでは結果を伝えたことにならない。
+
+    Args:
+        spoiler (bool): 結果の部分を Discord のネタバレ（||…||）で伏せるか。
+            ⭕ 本文に着順を出すと、メッセージを開いた瞬間に結果が見えてしまう。
+               再生を先に楽しみたいので、レース名だけ見せて中身は伏せる。
+               CLIから呼ぶときは伏せない（ターミナルでは `||` がただの文字になる）。
+    """
+    head, body = format_result_parts(entry_result, rows)
+    if spoiler:
+        return head + '\n' + f"||{body}||"
+    return head + '\n' + body
+
+
+def format_result_parts(entry_result, rows=RESULT_ROWS):
+    """レース結果を「見せる部分」と「伏せてよい部分」に分けて返します。
+
+    Returns:
+        tuple: (head: レース名など結果を含まない見出し, body: 着順とイベント)
     """
     race, mine = entry_result['race'], entry_result['finish']
     result = entry_result['result']
@@ -580,15 +598,16 @@ def format_result(entry_result, rows=RESULT_ROWS):
 
     verdict = '🥇 勝ちました！' if mine == 1 else ('🥈 惜しい2着' if mine == 2
               else ('🥉 3着' if mine == 3 else f"{mine}着"))
-    body = (f"{verdict} ／ タイム {_mmss(me['time'])} ／ 上がり3F {me['last3f']:.1f}"
-            f" ／ 通過 {'-'.join(str(p) for p in me['passing'])} ／ {me['style']}")
+    lines = [f"{verdict} ／ タイム {_mmss(me['time'])} ／ 上がり3F {me['last3f']:.1f}"
+             f" ／ 通過 {'-'.join(str(p) for p in me['passing'])} ／ {me['style']}"]
 
     # ⭕ 自分の馬が上位に入らなかったときは、上位に加えて自分の行も必ず出す。
     shown = horses[:rows]
     if me not in shown:
         shown = shown + [me]
 
-    lines = ['```', '着 馬番 馬名                 タイム   着差']
+    lines.append('```')
+    lines.append('着 馬番 馬名                 タイム   着差')
     for h in shown:
         mark = '★' if h['is_player'] else ' '
         margin = '  --  ' if h['finish'] == 1 else f"{h['margin']:+5.1f} "
@@ -596,8 +615,9 @@ def format_result(entry_result, rows=RESULT_ROWS):
                      f" {_mmss(h['time'])} {margin}")
     lines.append('```')
 
-    tail = '\n'.join(entry_result['events']) if entry_result['events'] else ''
-    return head + '\n' + body + '\n' + '\n'.join(lines) + ('\n' + tail if tail else '')
+    if entry_result['events']:
+        lines.extend(entry_result['events'])
+    return head, '\n'.join(lines)
 
 
 def _pad(text, width):
