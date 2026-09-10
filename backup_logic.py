@@ -22,7 +22,8 @@ BACKUP_DIR = os.path.join('data', '_backups')
 # ⚠️ service_account.json（Googleの秘密鍵）は絶対に追加しないこと。
 BACKUP_TARGETS = (
     'todo.json',            # タスク一覧
-    'player_data.json',     # 学習記録・レベル・EXP
+    'stable.json',          # 厩舎（現役馬・引退馬・成長）
+    'player_data.json',     # 旧・就活RPGの記録（初代馬への移行元）
     'glossary.json',        # ストックした用語
     'exam_data.json',       # 演習成績
     'training_data.json',   # トレーニングログ・体組成

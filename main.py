@@ -1,6 +1,5 @@
 import asyncio
-import os
-from datetime import time, timezone, timedelta, datetime
+from datetime import datetime
 from dotenv import load_dotenv
 
 # 環境変数の読み込み（calendar_logic等がモジュール読み込み時に環境変数を参照するため、
@@ -8,61 +7,45 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import discord
-from discord import app_commands
 from discord.ext import tasks
-from discord.ui import Button, View, Select
+from discord.ui import View
 
-import backup_logic
-import calendar_logic
 import exam_logic
+import horse_logic
 import news_logic
-import study_logic
 import task_logic
 import training_logic
 import typing_logic
 
-TOKEN = os.getenv('DISCORD_TOKEN')
+# ⭕ bot_stateがclient/treeを保持する。以降のui_*.pyはこれをimportして
+# 同じclient/treeにコマンドやイベントを登録する（循環importを避けるための構成）。
+from race_sim import calendar as race_calendar
+from bot_state import client, tree, getenv_int, TOKEN, JST, DELIVERY_TIMES, NEWS_CHANNEL_ID, TASK_CHANNEL_ID
 
-# Discord クライアントの初期化設定
-# ⭕ スラッシュコマンドはDiscordが構造化データとして送ってくるため、
-# テキストコマンド時代に必要だった message_content 特権インテントは不要
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
+# ui_common の関数は tests/test_main.py から main.X として参照され続けるため、
+# ここで再エクスポートする（実体はui_common.py側にある）。
+from ui_common import (
+    parse_positive_int, parse_float, build_growth_message,
+    process_task_completion, process_exam_completion, process_session, try_sync_to_calendar,
+)
 
-# ====================================================
-# ⚙️ システム定数・設定値
-# ====================================================
-def getenv_int(key, default):
-    """環境変数を整数として読みます。
-
-    ⭕ docker-composeの ${VAR} 展開は、対応する.envのキーが無いと変数を
-       「空文字列」として渡します。os.getenv(key, default)のデフォルト引数は
-       変数が完全に未定義の場合しか使われず、空文字列には効かないため、
-       int('')でBot起動時にクラッシュする事故が実際に起きました。
-       ここで空文字列も明示的にデフォルト扱いにして、.envの更新漏れが
-       あっても起動を落とさずフォールバックできるようにします。
-    """
-    value = os.getenv(key)
-    return int(value) if value else default
-
-
-JST = timezone(timedelta(hours=9))
-DELIVERY_TIMES = [time(8, 0, tzinfo=JST), time(20, 0, tzinfo=JST)]
-NEWS_CHANNEL_ID = getenv_int('NEWS_CHANNEL_ID', 1498093810356453508)
-TASK_CHANNEL_ID = getenv_int('TASK_CHANNEL_ID', NEWS_CHANNEL_ID)
-# バックアップの送り先。未設定ならタスク用チャンネルへ送る
-BACKUP_CHANNEL_ID = getenv_int('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID)
-# 週次バックアップの実行時刻。8:00の定期配信と処理が重ならないよう10分ずらす
-BACKUP_TIME = time(8, 10, tzinfo=JST)
-BACKUP_WEEKDAY = 0  # 0=月曜
-FOCUS_TIMER_SECONDS = 1500
-
-# タスク完了時に獲得できる疑似作業時間（15分 = 150 EXP）
-TASK_COMPLETE_MINUTES = 15
-
-# ⭕ 集中タイマーの多重起動防止用：user_id -> 実行中のasyncio.Taskを保持
-active_focus_timers = {}
+# ⭕ 各ui_*.pyをimportすることで、モジュールレベルの @tree.command 等が実行され、
+# 共有のtreeへコマンドが登録される。MainMenuViewが参照するサブメニューViewも
+# ここから取り込む。
+import ui_task
+import ui_horse
+import ui_news
+import ui_exam
+import ui_training
+import ui_typing
+import ui_utility
+from ui_task import TaskSelectCombinedView
+from ui_horse import StableMenuView, run_pending_race
+from ui_news import NewsTermsMenuView
+from ui_exam import ExamMenuView
+from ui_training import TrainingMenuView, DailyLogView, send_training_notification
+from ui_typing import TypingMenuView, TypingLogView, send_typing_notification
+from ui_utility import UtilityMenuView, weekly_backup_task
 
 
 # ====================================================
@@ -129,7 +112,7 @@ async def xml_news_delivery_task():
 
         # 📅 月曜朝は週間サマリーも配信
         if task_channel is not None and now_jst.weekday() == 0:
-            summary_msg = study_logic.get_weekly_summary()
+            summary_msg = horse_logic.get_weekly_summary()
             completed, scheduled = training_logic.get_weekly_training_rate()
             summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
             summary_msg += exam_logic.get_weekly_exam_summary()
@@ -147,647 +130,32 @@ async def xml_news_delivery_task():
         if task_channel is not None:
             await send_typing_notification(task_channel)
 
-
-# ====================================================
-# 🗃️ 共通ヘルパー関数
-# ====================================================
-def parse_positive_int(text):
-    """モーダルの入力文字列を整数に変換します。全角数字も受け付けます。
-
-    str.isdigit()は「²」のような文字にもTrueを返す一方でint()は失敗するため、
-    判定に頼らず実際にint()を試して例外を捕まえる方式にしています。
-
-    Returns:
-        int/None: 変換できた整数。数値として解釈できない場合はNone。
-    """
-    try:
-        return int(text.strip())
-    except (ValueError, AttributeError):
-        return None
-
-
-def parse_float(text):
-    """モーダルの入力文字列を小数に変換します（afk% のように小数を取りうる項目用）。
-
-    Returns:
-        float/None: 変換できた小数。数値として解釈できない場合はNone。
-    """
-    try:
-        return float(text.strip())
-    except (ValueError, AttributeError):
-        return None
-
-
-def build_event_message(result):
-    """study_logic.add_exp()の返り値(dict)から、レベルアップ・ボス・連続記録・実績バッジの
-    イベント文言を組み立てます。
-
-    ボスへの通常ダメージ（BOSS_DAMAGE）は毎回起きる細かい進捗なので公開告知の対象外とし、
-    レベルアップ・ボス出現・ボス撃破・連続記録の節目・実績バッジ獲得という「節目」だけを
-    公開告知の対象にします。
-
-    Returns:
-        tuple: (detail_msg: 本人向けの詳細文言, public_msg: 公開告知文言 または None)
-    """
-    detail_msg = ""
-    announcements = []
-
-    event = result["event"]
-    if event == "BOSS_APPEAR":
-        detail_msg += "\n🚨 **WARNING!! WARNING!!** 🚨\n```diff\n- 新たな課題（ボス）が出現しました！\n```ステータスを確認して、撃破を目指してください！\n"
-        announcements.append("🚨 新たな課題（ボス）が出現しました！")
-    elif event == "BOSS_DAMAGE":
-        detail_msg += "\n⚔️ **TASK ATTACK!**\n集中した努力がボスに ダメージを与えた！\n"
-    elif event == "BOSS_DEFEATED":
-        detail_msg += "\n🎊 **MISSION COMPLETE!!** 🎊\n```fix\n見事に目の前の課題ボスを撃破しました！\n```撃破ボーナスを獲得！次の作業も頑張りましょう。\n"
-        announcements.append("🎊 課題ボスを撃破しました！")
-
-    if result["is_level_up"]:
-        level = result["new_level"]
-        detail_msg += f"\n🎊 レベルアップ！ 各スキルの習得度が出現 Lv.{level} になりました！"
-        announcements.append(f"🎊 レベルアップ！ Lv.{level} になりました！")
-
-    streak = result["streak"]
-    if streak in study_logic.STREAK_MILESTONES:
-        streak_msg = f"🔥 {streak}日連続達成！EXPボーナスが発生しています！"
-        detail_msg += f"\n{streak_msg}"
-        announcements.append(streak_msg)
-
-    for badge in result["new_badges"]:
-        badge_msg = f"🏅 新しい実績を解除: {badge['name']}"
-        detail_msg += f"\n{badge_msg}"
-        announcements.append(badge_msg)
-
-    public_msg = "\n".join(announcements) if announcements else None
-    return detail_msg, public_msg
-
-
-async def run_focus_timer(channel, user_id, user_mention):
-    """集中タイマー本体。指定秒数の経過を待ち、開発カテゴリのEXPとして自動記録します。
-
-    途中でキャンセルされた場合（asyncio.CancelledError）はEXPを記録せず、
-    静かに終了します。
-    """
-    try:
-        await asyncio.sleep(FOCUS_TIMER_SECONDS)
-    except asyncio.CancelledError:
-        return
-    finally:
-        # 完了・キャンセルいずれの場合も、多重起動防止の管理対象から外す
-        active_focus_timers.pop(user_id, None)
-
-    minutes = int(FOCUS_TIMER_SECONDS / 60)
-    result = study_logic.add_exp("programming", minutes)
-    msg = f"{user_mention} {minutes}分経過しました！お疲れ様でした。☕\n💻 開発作業{minutes}分を自動記録しました！（+{result['earned_exp']} EXP）"
-
-    event_detail, _ = build_event_message(result)
-    msg += event_detail
-
-    await channel.send(msg)
-
-
-def process_task_completion(category):
-    """タスク完了時のカテゴリに応じたEXP加算とゲーム内イベント文言の生成処理
-
-    Returns:
-        tuple: (detail_msg: 本人向けの詳細文言, public_msg: 公開告知文言 または None)
-    """
-    if not category:
-        return "", None
-
-    result = study_logic.add_exp(category, TASK_COMPLETE_MINUTES)
-    cat_name = task_logic.CATEGORY_MAP.get(category, "開発")
-    detail_msg = f"\n✨ タスク完了ボーナス獲得！ 【{cat_name}】+ {result['earned_exp']} EXP"
-
-    event_detail, public_msg = build_event_message(result)
-    detail_msg += event_detail
-
-    return detail_msg, public_msg
-
-
-# 過去問1問あたりの目安所要時間（分）。EXP換算のみに使い、演習記録そのものには影響しない。
-EXAM_MINUTES_PER_QUESTION = 1.5
-
-
-def process_exam_completion(total):
-    """過去問演習の記録に応じて、目安時間分のreading EXPを自動付与する。
-
-    以前は演習記録（exam_logic）とRPGのEXP（study_logic）が完全に独立しており、
-    両方欲しい場合は同じ勉強内容を「📚インプットを報告」で二重入力する必要があった。
-    ここで自動連携することで、/exam log の記録だけで両方が揃うようにする。
-
-    Returns:
-        tuple: (detail_msg: 本人向けの追記文言, public_msg: 公開告知文言 または None)
-    """
-    minutes = round(total * EXAM_MINUTES_PER_QUESTION)
-    if minutes <= 0:
-        return "", None
-
-    result = study_logic.add_exp("reading", minutes)
-    detail_msg = f"\n✨ インプットEXPも獲得！（目安{minutes}分相当）+ {result['earned_exp']} EXP"
-
-    event_detail, public_msg = build_event_message(result)
-    detail_msg += event_detail
-
-    return detail_msg, public_msg
-
-
-async def try_sync_to_calendar(task_text, category, deadline_str):
-    """期限が指定されていれば、Googleカレンダーにも予定を同期します。
-
-    カレンダー連携が未設定の場合や、期限が指定されていない場合は何もしません。
-    Google Calendar APIへの通信は同期処理なので、asyncio.to_threadで別スレッド
-    実行し、Bot全体がブロックされないようにしています。
-
-    Returns:
-        str: 案内文言（登録できなかった場合は空文字）。
-    """
-    formatted_deadline = task_logic.parse_deadline(deadline_str)
-    if not formatted_deadline:
-        return ""
-
-    category_name = task_logic.CATEGORY_MAP.get(category, "開発")
-    event_link = await asyncio.to_thread(
-        calendar_logic.create_deadline_event, task_text, category_name, formatted_deadline
-    )
-    return "\n📅 Googleカレンダーにも登録しました。" if event_link else ""
+        # 🏁 開催日（土曜・水曜）は登録してあるレースを実行する
+        # ⭕ 定期配信のループは1つだけ、という既存のルールを守り、夜の分岐に相乗りする。
+        if task_channel is not None and race_calendar.is_race_day(now_jst.date()):
+            ran = await run_pending_race(task_channel)
+            if not ran:
+                print("⏰ [開催日] 出走登録がありませんでした。")
 
 
 # ====================================================
-# 🎯 UI コンポーネント（Views / Modals）
+# 🎯 メインメニュー
 # ====================================================
-
-class TaskCategorySelectView(View):
-    """タスク追加の1ステップ目：カテゴリをボタンで選ばせるView（typoによる誤登録を防ぐ）"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="💻 開発", style=discord.ButtonStyle.primary)
-    async def programming_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TaskAddModal("programming"))
-
-    @discord.ui.button(label="📝 書類・面接", style=discord.ButtonStyle.primary)
-    async def document_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TaskAddModal("document"))
-
-    @discord.ui.button(label="📚 インプット", style=discord.ButtonStyle.primary)
-    async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TaskAddModal("reading"))
-
-
-class TaskAddModal(discord.ui.Modal, title='📝 新しいタスクの追加'):
-    """カテゴリ選択後にポップアップする、タスク内容・期限入力用のモーダルフォーム"""
-    task_input = discord.ui.TextInput(
-        label='タスクの内容',
-        placeholder='例: 職務経歴書の推敲、ボットのUI拡張など',
-        required=True
-    )
-    deadline_input = discord.ui.TextInput(
-        label='期限・締切（月/日）',
-        placeholder='例: 6/15, 2026-06-15 など（空欄なら期限なし）',
-        required=False,
-        max_length=15
-    )
-
-    def __init__(self, category):
-        super().__init__()
-        self.category = category
-
-    async def on_submit(self, interaction: discord.Interaction):
-        # ⭕ 優先度はここでは確定させず、次のステップ（ボタン選択）に引き継ぐ
-        view = TaskPrioritySelectView(self.task_input.value, self.category, self.deadline_input.value.strip())
-        await interaction.response.send_message("優先度を選んでね：", view=view, ephemeral=True)
-
-
-class TaskPrioritySelectView(View):
-    """タスク追加の最終ステップ：優先度をボタンで選ばせ、登録を確定するView"""
-    def __init__(self, task_text, category, deadline_str):
-        super().__init__(timeout=60)
-        self.task_text = task_text
-        self.category = category
-        self.deadline_str = deadline_str
-
-    async def _finish(self, interaction: discord.Interaction, priority):
-        result_msg = task_logic.add_task(self.task_text, self.category, self.deadline_str, priority)
-        # ⭕ 先に登録完了を返信してから、Googleカレンダー連携（外部通信）を後追いで行う。
-        # interaction.response.send_message()は受信から約3秒以内に呼ぶ必要があるため、
-        # 応答時間が読めない外部API呼び出しを先に待ってしまうと失敗する可能性がある。
-        await interaction.response.send_message(result_msg, ephemeral=True)
-
-        calendar_msg = await try_sync_to_calendar(self.task_text, self.category, self.deadline_str)
-        if calendar_msg:
-            await interaction.followup.send(calendar_msg.strip(), ephemeral=True)
-
-    @discord.ui.button(label="★★★ 高", style=discord.ButtonStyle.danger)
-    async def high_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._finish(interaction, 3)
-
-    @discord.ui.button(label="★★☆ 中", style=discord.ButtonStyle.primary)
-    async def mid_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._finish(interaction, 2)
-
-    @discord.ui.button(label="★☆☆ 低", style=discord.ButtonStyle.secondary)
-    async def low_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._finish(interaction, 1)
-
-
-class FocusTimerView(View):
-    """集中タイマー実行中に表示する、キャンセルボタン付きView"""
-    def __init__(self, user_id):
-        super().__init__(timeout=FOCUS_TIMER_SECONDS + 10)
-        self.user_id = user_id
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.danger, emoji="🛑")
-    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        task = active_focus_timers.get(self.user_id)
-        if task and not task.done():
-            task.cancel()
-            active_focus_timers.pop(self.user_id, None)
-            self.stop()
-            await interaction.response.edit_message(content="⏹️ 集中タイマーをキャンセルしました。", view=None)
-        else:
-            await interaction.response.send_message("既に終了しているか、キャンセルできるタイマーがありません。", ephemeral=True)
-
-
-class StudyStatusMenuView(View):
-    """「作業・ステータス」サブメニュー：作業記録・集中タイマー・ステータス確認をまとめたView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-        p_data = study_logic.load_player_data()
-        is_boss_active = p_data.get("is_boss_active", False)
-        if is_boss_active:
-            self.study_menu.style = discord.ButtonStyle.danger
-            self.study_menu.label = "🚨 ボス襲来！作業の記録"
-        else:
-            self.study_menu.style = discord.ButtonStyle.success
-            self.study_menu.label = "📖 作業の記録"
-
-    @discord.ui.button(label="📖 作業の記録", style=discord.ButtonStyle.success, row=0)
-    async def study_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = WorkReportView()
-        await interaction.response.send_message("作業内容：カテゴリを選んでください", view=view, ephemeral=True)
-
-    @discord.ui.button(label="集中タイマー", style=discord.ButtonStyle.secondary, emoji="⏱️", row=0)
-    async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = interaction.user.id
-        existing_task = active_focus_timers.get(user_id)
-        if existing_task and not existing_task.done():
-            await interaction.response.send_message("既に集中タイマーが進行中です。先に完了かキャンセルをしてください。", ephemeral=True)
-            return
-
-        # ⭕ Discordのタイムスタンプ書式(<t:...:R>)を使うと、Bot側で何もしなくても
-        # クライアント側で「あと24分」のように自動でリアルタイム更新される
-        end_ts = int((discord.utils.utcnow() + timedelta(seconds=FOCUS_TIMER_SECONDS)).timestamp())
-        view = FocusTimerView(user_id)
-        await interaction.response.send_message(
-            f"⏱️ 集中タイムを開始します！開発（programming）の経験値に連動します。\n"
-            f"終了予定: <t:{end_ts}:R>（<t:{end_ts}:t>）",
-            view=view,
-            ephemeral=True
-        )
-
-        task = asyncio.create_task(run_focus_timer(interaction.channel, user_id, interaction.user.mention))
-        active_focus_timers[user_id] = task
-
-    @discord.ui.button(label="⚔️ ステータス", style=discord.ButtonStyle.danger, row=0)
-    async def status_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        status_msg = study_logic.get_status_summary()
-        embed = discord.Embed(title=f"🛡️ {interaction.user.display_name} の冒険 of 就活攻略RPG", color=0xffd700)
-        embed.description = status_msg
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-class NewsTermsMenuView(View):
-    """「ニュース用語」サブメニュー：未登録語の検出・追跡語の管理をまとめたView
-
-    ⭕ 以前は用語のストック・検索・一覧・SRSクイズもここにあったが、使われて
-       いなかったため削除した（study_logic.py参照）。ニュースの追跡語専用に縮小。
-    """
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="🆕 ニュースの新語", style=discord.ButtonStyle.primary, row=0)
-    async def unknown_terms_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # RSS取得は応答時間が読めないため、先に応答を保留してから処理する
-        await interaction.response.defer(ephemeral=True)
-        terms = await asyncio.to_thread(news_logic.get_unknown_terms)
-
-        if not terms:
-            await interaction.followup.send(
-                "未登録の頻出語は見つかりませんでした。", ephemeral=True
-            )
-            return
-
-        await interaction.followup.send(
-            "ニュースで見つかった未登録の頻出語です。\n"
-            "選んだ語はニュースの絞り込みに使われます：",
-            view=UnknownTermSelectView(terms), ephemeral=True,
-        )
-
-    @discord.ui.button(label="📰 追跡語の管理", style=discord.ButtonStyle.secondary, row=0)
-    async def news_keywords_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        keywords = news_logic.load_news_keywords()
-        if not keywords:
-            await interaction.response.send_message(
-                "ニュース追跡語はまだ登録されていません。\n"
-                "「🆕 ニュースの新語」から登録できます。",
-                ephemeral=True,
-            )
-            return
-
-        msg = f"📰 **【ニュース追跡語】**（{len(keywords)}件）\n\n"
-        msg += "、".join(keywords)
-        await interaction.response.send_message(
-            msg, view=NewsKeywordRemoveView(keywords), ephemeral=True
-        )
-
-
-class ExamMenuView(View):
-    """「資格学習」サブメニュー：過去問演習の記録・成績確認をまとめたView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="📝 演習を記録", style=discord.ButtonStyle.primary, row=0)
-    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "演習した分野を選んでください：", view=ExamFieldSelectView(), ephemeral=True
-        )
-
-    @discord.ui.button(label="📊 演習成績", style=discord.ButtonStyle.secondary, row=0)
-    async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
-
-
-class TrainingMenuView(View):
-    """「トレーニング」サブメニュー：今日のメニュー・記録・体組成の記録/履歴をまとめたView
-
-    他の全機能がボタンから辿れるのに対し、トレーニングだけ/trainingスラッシュコマンドの
-    みだった対応漏れを埋める。ロジック側の関数はスラッシュコマンド版と共通利用する。
-    """
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="💪 今日のメニュー", style=discord.ButtonStyle.success, row=0)
-    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        image_paths = training_logic.get_today_menu_image_paths()
-        files = [discord.File(p) for p in image_paths] if image_paths else None
-        await interaction.response.send_message(training_logic.get_today_menu(), files=files, ephemeral=True)
-
-    @discord.ui.button(label="✅ 完了を記録", style=discord.ButtonStyle.primary, row=0)
-    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg, streak = training_logic.log_session()
-        await interaction.response.send_message(msg, ephemeral=True)
-        if streak in training_logic.TRAINING_STREAK_MILESTONES:
-            await interaction.channel.send(f"{interaction.user.mention} 🔥 筋トレ{streak}日連続達成！")
-
-    @discord.ui.button(label="📏 体組成を記録", style=discord.ButtonStyle.secondary, row=1)
-    async def measure_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TrainingMeasureModal())
-
-    @discord.ui.button(label="📈 体組成の履歴", style=discord.ButtonStyle.secondary, row=1)
-    async def history_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(training_logic.get_measurement_history(), ephemeral=True)
-
-
-class TrainingMeasureModal(discord.ui.Modal, title='📏 体組成の記録'):
-    """体重・お腹周りの入力モーダル（/training measureのボタン版）"""
-    weight_input = discord.ui.TextInput(label='体重(kg)', placeholder='例: 65.5', required=True, max_length=6)
-    waist_input = discord.ui.TextInput(label='お腹周り(cm)', placeholder='例: 82.0', required=True, max_length=6)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        weight_kg = parse_float(self.weight_input.value)
-        waist_cm = parse_float(self.waist_input.value)
-        if weight_kg is None or waist_cm is None:
-            await interaction.response.send_message("体重・お腹周りは数字で入力してください！", ephemeral=True)
-            return
-
-        msg = training_logic.log_measurement(weight_kg, waist_cm)
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
-class DailyLogView(View):
-    """定期通知にそのまま添えて、ワンタップで実施を記録するためのView
-
-    通知が届いた場所で押せることが要点。メニューを辿らせると記録が続かないため、
-    timeout=None で常設し、いつ押しても記録できるようにしている。
-    """
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="✅ 今日の筋トレ完了", style=discord.ButtonStyle.success, custom_id="log_training")
-    async def training_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg, streak = training_logic.log_session()
-        await interaction.response.send_message(msg, ephemeral=True)
-        if streak in training_logic.TRAINING_STREAK_MILESTONES:
-            await interaction.channel.send(
-                f"{interaction.user.mention} 🔥 筋トレ{streak}日連続達成！"
-            )
-
-
-class TypingLogView(View):
-    """夜のタイピング通知に添える、実施記録用のView"""
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="✅ 今日の練習完了", style=discord.ButtonStyle.success, custom_id="log_typing")
-    async def practice_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        msg, streak = typing_logic.log_practice()
-        await interaction.response.send_message(msg, ephemeral=True)
-        if streak in typing_logic.PRACTICE_STREAK_MILESTONES:
-            await interaction.channel.send(
-                f"{interaction.user.mention} 🔥 タイピング{streak}日連続達成！"
-            )
-
-    @discord.ui.button(label="🎯 計測を記録", style=discord.ButtonStyle.secondary, custom_id="log_typing_measure")
-    async def measure_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TypingMeasureModal())
-
-
-class TypingMenuView(View):
-    """「タイピング訓練」サブメニュー：日次メニュー・ドリル本文・計測記録をまとめたView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="⌨️ 今日のメニュー", style=discord.ButtonStyle.success, row=0)
-    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(typing_logic.get_daily_menu(), ephemeral=True)
-
-    @discord.ui.button(label="📄 ドリル本文", style=discord.ButtonStyle.primary, row=0)
-    async def drill_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "表示するドリルを選んでください：", view=TypingDrillSelectView(), ephemeral=True
-        )
-
-    @discord.ui.button(label="🎯 計測を記録", style=discord.ButtonStyle.primary, row=0)
-    async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TypingMeasureModal())
-
-    @discord.ui.button(label="📈 進捗", style=discord.ButtonStyle.secondary, row=1)
-    async def progress_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(typing_logic.get_progress_summary(), ephemeral=True)
-
-    @discord.ui.button(label="🖐️ 指の担当表", style=discord.ButtonStyle.secondary, row=1)
-    async def keys_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(typing_logic.get_key_guide('jis'), ephemeral=True)
-
-    @discord.ui.button(label="⏭️ 次のドリルへ", style=discord.ButtonStyle.secondary, row=1)
-    async def advance_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(typing_logic.advance_drill(), ephemeral=True)
-
-
-class TypingDrillSelectView(View):
-    """表示するドリル（A〜E）をプルダウンで選ばせるView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-        options = [
-            discord.SelectOption(label=f"Drill {did} — {d['name']}"[:100], value=did)
-            for did, d in typing_logic.DRILLS.items()
-        ]
-        options.append(discord.SelectOption(label="Drill E — 英字の弱点補強（keybr）", value="E"))
-        self.add_item(TypingDrillDropdown(options))
-
-
-class TypingDrillDropdown(Select):
-    def __init__(self, options):
-        super().__init__(placeholder='ドリルを選択...', min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            typing_logic.get_drill_text(self.values[0]), ephemeral=True
-        )
-
-
-class TypingMeasureModal(discord.ui.Modal, title='🎯 タイピング計測の記録'):
-    """monkeytypeの計測結果を入力するモーダル
-
-    afkはmonkeytypeが「検出された時だけ」リザルトに表示するため、
-    表示が無いケース（＝実質0%）でも記録できるよう任意入力にしています。
-    """
-    wpm_input = discord.ui.TextInput(label='net WPM', placeholder='例: 24', required=True, max_length=3)
-    accuracy_input = discord.ui.TextInput(label='accuracy(%)', placeholder='例: 89', required=True, max_length=3)
-    consistency_input = discord.ui.TextInput(label='consistency(%)', placeholder='例: 57', required=True, max_length=3)
-    afk_input = discord.ui.TextInput(
-        label='afk(%)',
-        placeholder='リザルトに表示が無ければ空欄でOK（0%扱い）',
-        required=False,
-        max_length=5,
-    )
-    note_input = discord.ui.TextInput(label='メモ（任意）', placeholder='例: 30秒台で停止', required=False, max_length=100)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        wpm = parse_positive_int(self.wpm_input.value)
-        accuracy = parse_positive_int(self.accuracy_input.value)
-        consistency = parse_positive_int(self.consistency_input.value)
-
-        # 空欄はafk検出なし（0%）とみなす。値がある場合のみ数値として解釈する
-        afk_raw = (self.afk_input.value or "").strip()
-        afk = 0.0 if not afk_raw else parse_float(afk_raw)  # afkは2.5のような小数を取りうる
-
-        if None in (wpm, accuracy, consistency, afk):
-            await interaction.response.send_message(
-                "各項目は数字で入力してください（afkのみ小数可・空欄可）。", ephemeral=True
-            )
-            return
-
-        msg = typing_logic.log_measurement(wpm, accuracy, consistency, afk, self.note_input.value)
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
-class ExamFieldSelectView(View):
-    """演習記録の1ステップ目：分野をプルダウンで選ばせるView
-
-    分野は6つあり、ボタンだと横幅を圧迫するためセレクトメニューを採用している。
-    """
-    def __init__(self):
-        super().__init__(timeout=60)
-        options = [
-            discord.SelectOption(label=display_name[:100], value=field_id)
-            for field_id, display_name in exam_logic.EXAM_FIELDS.items()
-        ]
-        self.add_item(ExamFieldDropdown(options))
-
-
-class ExamFieldDropdown(Select):
-    def __init__(self, options):
-        super().__init__(placeholder='演習した分野を選択...', min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        # 選んだ分野を引き継いで、問題数・正解数の入力モーダルを開く
-        await interaction.response.send_modal(ExamLogModal(self.values[0]))
-
-
-class ExamLogModal(discord.ui.Modal, title='📝 過去問演習の記録'):
-    """分野選択後にポップアップする、問題数・正解数の入力モーダル"""
-    total_input = discord.ui.TextInput(
-        label='解いた問題数',
-        placeholder='例: 20 （半角数字）',
-        required=True,
-        max_length=4,
-    )
-    correct_input = discord.ui.TextInput(
-        label='正解した問題数',
-        placeholder='例: 13 （半角数字）',
-        required=True,
-        max_length=4,
-    )
-
-    def __init__(self, field):
-        super().__init__()
-        self.field = field
-
-    async def on_submit(self, interaction: discord.Interaction):
-        total = parse_positive_int(self.total_input.value)
-        correct = parse_positive_int(self.correct_input.value)
-        if total is None or correct is None:
-            await interaction.response.send_message("問題数・正解数は数字で入力してください！", ephemeral=True)
-            return
-
-        msg = exam_logic.log_session(self.field, total, correct)
-        if not msg.startswith("❌"):
-            exp_msg, public_msg = process_exam_completion(total)
-            msg += exp_msg
-        else:
-            public_msg = None
-
-        await interaction.response.send_message(msg, ephemeral=True)
-        if public_msg:
-            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-class UtilityMenuView(View):
-    """「その他」サブメニュー：データ出力・ニュース確認をまとめたView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="💾 データ出力", style=discord.ButtonStyle.secondary, row=0)
-    async def backup_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # ⭕ ephemeralな返信は自分にしか見えず消えるため、保管場所としては機能しない。
-        #    週次バックアップと同じ経路でチャンネルへ残す。
-        await interaction.response.defer(ephemeral=True)
-        await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
-        await interaction.followup.send(
-            "バックアップチャンネルへ書き出しました。", ephemeral=True
-        )
-
-    @discord.ui.button(label="📰 最新ITニュースを確認", style=discord.ButtonStyle.primary, row=0)
-    async def news_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        news_msg = await asyncio.to_thread(news_logic.get_it_news)
-        await interaction.followup.send(news_msg, ephemeral=True)
-
-
 class MainMenuView(View):
-    """ボットのコア機能を4つのカテゴリに整理したメインメニューを制御するViewクラス"""
+    """ボットのコア機能を6つのカテゴリに整理したメインメニューを制御するViewクラス
+
+    各サブメニューの実体はui_*.pyに分割されており、ここではそれらを束ねるだけ。
+    """
     def __init__(self):
         super().__init__(timeout=None)
-        p_data = study_logic.load_player_data()
-        is_boss_active = p_data.get("is_boss_active", False)
-        if is_boss_active:
-            self.study_status_menu.style = discord.ButtonStyle.danger
-            self.study_status_menu.label = "🚨 ボス襲来！作業・ステータス"
+        # ⭕ 出走を控えているときはボタンで分かるようにする（旧RPGのボス襲来表示の後継）。
+        data = horse_logic.load_stable()
+        if data['current'].get('entry'):
+            self.stable_menu.style = discord.ButtonStyle.danger
+            self.stable_menu.label = "🏁 出走間近！厩舎"
         else:
-            self.study_status_menu.style = discord.ButtonStyle.success
-            self.study_status_menu.label = "📖 作業・ステータス"
+            self.stable_menu.style = discord.ButtonStyle.success
+            self.stable_menu.label = "🐎 厩舎・調教"
 
     @discord.ui.button(label="📋 タスク管理メニュー", style=discord.ButtonStyle.primary, row=0)
     async def task_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -795,9 +163,9 @@ class MainMenuView(View):
         view = TaskSelectCombinedView()
         await interaction.response.send_message(list_str, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📖 作業・ステータス", style=discord.ButtonStyle.success, row=0)
-    async def study_status_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("メニューを選んでください：", view=StudyStatusMenuView(), ephemeral=True)
+    @discord.ui.button(label="🐎 厩舎・調教", style=discord.ButtonStyle.success, row=0)
+    async def stable_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=StableMenuView(), ephemeral=True)
 
     @discord.ui.button(label="📰 ニュース用語", style=discord.ButtonStyle.secondary, row=0)
     async def news_terms_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -818,221 +186,6 @@ class MainMenuView(View):
     @discord.ui.button(label="🛠️ その他", style=discord.ButtonStyle.secondary, row=1)
     async def utility_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("メニューを選んでください：", view=UtilityMenuView(), ephemeral=True)
-
-
-class TaskSelectCombinedView(View):
-    """タスク一覧テキストの直下に、タスク追加ボタンと完了プルダウンを同時に出すView"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-        button = Button(label="新しいタスクを追加", style=discord.ButtonStyle.primary, row=0)
-        button.callback = self.add_task_callback
-        self.add_item(button)
-
-        # list_tasks()で表示順を確定させ、IDが未付与の古いタスクにIDを補完・保存してから読み込む
-        task_logic.list_tasks()
-        todo_list = task_logic.load_data()
-        options = []
-        for i, item in enumerate(todo_list):
-            if i >= 25:
-                break  # Discordの上限
-
-            task_text, stars = task_logic.get_display_fields(item)
-            label_text = f"{i+1}. [{stars}] {task_text}"
-            if len(label_text) > 90:
-                label_text = label_text[:90] + "..."
-
-            # 一意なIDを渡すことで、選択後にタスクが増減・並び替えされても正しいタスクを特定できる
-            options.append(discord.SelectOption(label=label_text, value=item['id']))
-
-        if options:
-            self.add_item(TaskDropdownCombined(options))  # row=1 にプルダウンを配置
-
-    async def add_task_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message("カテゴリを選んでね：", view=TaskCategorySelectView(), ephemeral=True)
-
-
-class TaskDropdownCombined(Select):
-    def __init__(self, options):
-        super().__init__(placeholder='完了したタスクを選んでプルダウンを閉じる...', min_values=1, max_values=1, options=options, row=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        selected_value = self.values[0]
-        result_msg, category = task_logic.complete_task(selected_value)
-        rpg_msg, public_msg = process_task_completion(category)
-        await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
-        if public_msg:
-            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-class UnknownTermSelectView(View):
-    """ニュースから検出した未登録語を、ニュース追跡語として登録するView"""
-    def __init__(self, terms):
-        super().__init__(timeout=120)
-
-        options = []
-        for item in terms[:25]:  # セレクトメニューの上限
-            count_label = f"（{item['count']}件）" if item['count'] > 1 else ""
-            options.append(discord.SelectOption(
-                label=f"{item['term']}{count_label}"[:100],
-                description=item['title'][:100],
-                value=item['term'][:100],
-            ))
-        self.add_item(UnknownTermDropdown(options))
-
-
-class UnknownTermDropdown(Select):
-    def __init__(self, options):
-        super().__init__(
-            placeholder='追跡したい語を選択（複数可）...',
-            min_values=1,
-            max_values=len(options),  # まとめて登録できるようにする
-            options=options,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        added, skipped = news_logic.add_news_keywords(self.values)
-
-        lines = []
-        if added:
-            lines.append("📰 ニュース追跡語に登録しました: " + "、".join(added))
-        if skipped:
-            lines.append("（登録済みのためスキップ: " + "、".join(skipped) + "）")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
-
-class NewsKeywordRemoveView(View):
-    """登録済みのニュース追跡語を削除するView"""
-    def __init__(self, keywords):
-        super().__init__(timeout=120)
-        options = [discord.SelectOption(label=k[:100], value=k[:100]) for k in keywords[:25]]
-        self.add_item(NewsKeywordRemoveDropdown(options))
-
-
-class NewsKeywordRemoveDropdown(Select):
-    def __init__(self, options):
-        super().__init__(
-            placeholder='削除する語を選択（複数可）...',
-            min_values=1,
-            max_values=len(options),
-            options=options,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        removed = news_logic.remove_news_keywords(self.values)
-        msg = "🗑️ 削除しました: " + "、".join(removed) if removed else "削除対象が見つかりませんでした。"
-        await interaction.response.send_message(msg, ephemeral=True)
-
-
-class WorkReportView(View):
-    def __init__(self):
-        super().__init__(timeout=60)
-    
-    @discord.ui.button(label="💻 開発を報告", style=discord.ButtonStyle.success)
-    async def programming_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(WorkReportModal("programming", "開発・ポートフォリオ制作"))
-
-    @discord.ui.button(label="📝 書類・面接を報告", style=discord.ButtonStyle.success)
-    async def document_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(WorkReportModal("document", "書類作成・面接対策"))
-
-    @discord.ui.button(label="📚 インプットを報告", style=discord.ButtonStyle.success)
-    async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(WorkReportModal("reading", "技術書・ニュース学習"))
-
-
-class WorkReportModal(discord.ui.Modal):
-    def __init__(self, cat_id, cat_name):
-        super().__init__(title=f'{cat_name}の作業報告')
-        self.cat_id = cat_id
-        self.cat_name = cat_name
-
-    count_input = discord.ui.TextInput(label='作業した時間（分）を入力してください', placeholder='例: 25 （半角数字）', min_length=1, max_length=3)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        minutes = parse_positive_int(self.count_input.value)
-        if minutes is None or minutes <= 0:
-            await interaction.response.send_message("作業時間は1以上の数字（分）で入力してください！", ephemeral=True)
-            return
-
-        result = study_logic.add_exp(self.cat_id, minutes)
-        msg = f"✅ {self.cat_name}の作業（{minutes}分間）を記録しました！\n+{result['earned_exp']} EXP 獲得！"
-
-        event_detail, public_msg = build_event_message(result)
-        msg += event_detail
-
-        await interaction.response.send_message(msg, ephemeral=True)
-        # レベルアップ・ボス出現/撃破など節目のイベントはチャンネルにも告知する
-        if public_msg:
-            await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-# ====================================================
-# 📤 定期通知の送信処理
-# ====================================================
-# 定期配信とデバッグコマンドの両方から呼ぶ。片方だけ直して内容がズレるのを防ぐため、
-# 「何を送るか」はここに一本化する。
-async def send_training_notification(channel):
-    """今日のトレーニングメニューを、記録ボタン付きで送信します。"""
-    image_paths = training_logic.get_today_menu_image_paths()
-    # 休養日は記録するものが無いのでボタンを出さない
-    log_view = None if training_logic.is_rest_day() else DailyLogView()
-    files = [discord.File(p) for p in image_paths] if image_paths else None
-    await channel.send(training_logic.get_today_menu(), files=files, view=log_view)
-
-
-async def send_typing_notification(channel):
-    """今日のタイピングメニューとドリル本文を、記録ボタン付きで送信します。"""
-    await channel.send(typing_logic.get_daily_menu())
-    current_drill = typing_logic.load_typing_data().get('current_drill', 'A')
-    # ドリル本文と一緒に記録ボタンを出し、練習後そのまま押せるようにする
-    await channel.send(typing_logic.get_drill_text(current_drill), view=TypingLogView())
-
-
-async def run_backup(channel):
-    """データをZIPにまとめてチャンネルへ添付します。
-
-    ⭕ バックアップの失敗でBot本体が止まらないよう、例外はここで受け止めます。
-       「静かに失敗して気づかない」のが一番怖いので、失敗もチャンネルへ通知します。
-    """
-    if channel is None:
-        print("⚠️ [バックアップ] 送信先チャンネルが見つかりませんでした。")
-        return "送信先チャンネルが見つかりませんでした。"
-
-    try:
-        zip_path, included, missing = await asyncio.to_thread(backup_logic.create_archive)
-        message = backup_logic.build_message(zip_path, included, missing)
-
-        if zip_path and backup_logic.is_within_upload_limit(zip_path):
-            await channel.send(message, file=discord.File(zip_path))
-        else:
-            await channel.send(message)
-
-        await asyncio.to_thread(backup_logic.prune_old_archives)
-        print(f"🗄️ [バックアップ] 完了: {included}")
-        return message
-
-    except Exception as error:
-        print(f"❌ [バックアップ] 失敗: {type(error).__name__}: {error}")
-        try:
-            await channel.send(
-                f"❌ **【週次バックアップ】失敗しました**\n`{type(error).__name__}: {error}`"
-            )
-        except Exception:
-            pass
-        return f"失敗しました: {type(error).__name__}: {error}"
-
-
-@tasks.loop(time=BACKUP_TIME)
-async def weekly_backup_task():
-    """毎週決まった曜日に、データのバックアップをDiscordへ自動で書き出します。"""
-    await client.wait_until_ready()
-
-    if datetime.now(JST).weekday() != BACKUP_WEEKDAY:
-        return
-
-    print("🗄️ [週次バックアップ] 実行中...")
-    await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
 
 
 # ====================================================
@@ -1057,217 +210,12 @@ async def on_ready():
 
 
 # ====================================================
-# 🔤 スラッシュコマンド
+# 🔤 スラッシュコマンド（メニュー・デバッグ用）
 # ====================================================
-@tree.command(name="backup", description="いまのデータをZIPにしてバックアップチャンネルへ送ります")
-async def backup_command(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    await run_backup(client.get_channel(BACKUP_CHANNEL_ID))
-    await interaction.followup.send(
-        "バックアップを実行しました。バックアップチャンネルを確認してください。", ephemeral=True
-    )
-
-
 @tree.command(name="menu", description="操作メニューを表示します")
 async def menu_command(interaction: discord.Interaction):
     view = MainMenuView()
     await interaction.response.send_message("メニューを選んでください：", view=view)
-
-
-async def task_autocomplete(interaction: discord.Interaction, current: str):
-    """/done コマンドの引数を、現在登録中のタスク名から絞り込み候補として提示する"""
-    choices = []
-    for item in task_logic.load_data():
-        if not isinstance(item, dict):
-            continue
-        task_text, stars = task_logic.get_display_fields(item)
-        label = f"[{stars}] {task_text}"
-        if current.lower() in label.lower():
-            choices.append(app_commands.Choice(name=label[:100], value=item['id']))
-    return choices[:25]
-
-
-@tree.command(name="add", description="新しいタスクを追加します")
-@app_commands.describe(
-    task="タスクの内容",
-    category="カテゴリ",
-    deadline="期限（例: 6/15, 2026-06-15）省略可",
-    priority="優先度（省略時は中）",
-)
-@app_commands.choices(
-    category=[
-        app_commands.Choice(name="💻 開発", value="programming"),
-        app_commands.Choice(name="📝 書類・面接", value="document"),
-        app_commands.Choice(name="📚 インプット", value="reading"),
-    ],
-    priority=[
-        app_commands.Choice(name="★★★ 高", value=3),
-        app_commands.Choice(name="★★☆ 中", value=2),
-        app_commands.Choice(name="★☆☆ 低", value=1),
-    ],
-)
-async def add_command(
-    interaction: discord.Interaction,
-    task: str,
-    category: app_commands.Choice[str],
-    deadline: str = None,
-    priority: app_commands.Choice[int] = None,
-):
-    category_value = category.value
-    priority_value = priority.value if priority is not None else 2
-
-    result_msg = task_logic.add_task(task, category_value, deadline, priority_value)
-    await interaction.response.send_message(result_msg, ephemeral=True)
-
-    calendar_msg = await try_sync_to_calendar(task, category_value, deadline)
-    if calendar_msg:
-        await interaction.followup.send(calendar_msg.strip(), ephemeral=True)
-
-
-@tree.command(name="list", description="登録されているタスク一覧を表示します")
-async def list_command(interaction: discord.Interaction):
-    list_str = task_logic.list_tasks()
-    if "現在、登録されたタスクはありません" in list_str:
-        await interaction.response.send_message(list_str)
-    else:
-        view = TaskSelectCombinedView()
-        await interaction.response.send_message(list_str, view=view)
-
-
-@tree.command(name="done", description="タスクを完了させます")
-@app_commands.describe(task="完了させるタスク")
-@app_commands.autocomplete(task=task_autocomplete)
-async def done_command(interaction: discord.Interaction, task: str):
-    result_msg, category = task_logic.complete_task(task)
-    rpg_msg, public_msg = process_task_completion(category)
-    await interaction.response.send_message(f"{result_msg}{rpg_msg}", ephemeral=True)
-    if public_msg:
-        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-# ====================================================
-# 💪 トレーニング記録コマンド群（/training menu, log, measure, history）
-# ====================================================
-training_group = app_commands.Group(name="training", description="自宅ダンベルトレーニングの記録")
-
-
-@training_group.command(name="menu", description="今日のトレーニングメニューを表示します")
-async def training_menu_command(interaction: discord.Interaction):
-    image_paths = training_logic.get_today_menu_image_paths()
-    if image_paths:
-        files = [discord.File(p) for p in image_paths]
-        await interaction.response.send_message(training_logic.get_today_menu(), files=files, ephemeral=True)
-    else:
-        await interaction.response.send_message(training_logic.get_today_menu(), ephemeral=True)
-
-
-@training_group.command(name="log", description="今日のトレーニングを完了として記録します")
-@app_commands.describe(note="メモ（任意）")
-async def training_log_command(interaction: discord.Interaction, note: str = None):
-    msg, streak = training_logic.log_session(note)
-    await interaction.response.send_message(msg, ephemeral=True)
-
-    # 連続記録の節目だけチャンネルにも告知する
-    if streak in training_logic.TRAINING_STREAK_MILESTONES:
-        await interaction.channel.send(f"{interaction.user.mention} 🔥 トレーニング{streak}日連続達成！素晴らしいです！")
-
-
-@training_group.command(name="measure", description="体重・お腹周りを記録します")
-@app_commands.describe(weight_kg="体重(kg)", waist_cm="お腹周り(cm)")
-async def training_measure_command(interaction: discord.Interaction, weight_kg: float, waist_cm: float):
-    await interaction.response.send_message(training_logic.log_measurement(weight_kg, waist_cm), ephemeral=True)
-
-
-@training_group.command(name="history", description="体組成の記録一覧を表示します")
-async def training_history_command(interaction: discord.Interaction):
-    await interaction.response.send_message(training_logic.get_measurement_history(), ephemeral=True)
-
-
-tree.add_command(training_group)
-
-
-# ====================================================
-# 📝 応用情報 演習記録コマンド群（/exam log, stats）
-# ====================================================
-exam_group = app_commands.Group(name="exam", description="応用情報技術者試験の過去問演習の記録")
-
-# 分野の選択肢はexam_logic側の定義から生成し、二重管理を避ける
-EXAM_FIELD_CHOICES = [
-    app_commands.Choice(name=display_name, value=field_id)
-    for field_id, display_name in exam_logic.EXAM_FIELDS.items()
-]
-
-
-@exam_group.command(name="log", description="過去問演習の結果を記録します")
-@app_commands.describe(field="演習した分野", total="解いた問題数", correct="正解した問題数")
-@app_commands.choices(field=EXAM_FIELD_CHOICES)
-async def exam_log_command(
-    interaction: discord.Interaction,
-    field: app_commands.Choice[str],
-    total: int,
-    correct: int,
-):
-    msg = exam_logic.log_session(field.value, total, correct)
-    if not msg.startswith("❌"):
-        exp_msg, public_msg = process_exam_completion(total)
-        msg += exp_msg
-    else:
-        public_msg = None
-
-    await interaction.response.send_message(msg, ephemeral=True)
-    if public_msg:
-        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
-
-
-@exam_group.command(name="stats", description="分野別の演習成績・弱点分野を表示します")
-async def exam_stats_command(interaction: discord.Interaction):
-    await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
-
-
-tree.add_command(exam_group)
-
-
-# ====================================================
-# ⌨️ タイピング訓練コマンド群（/typing menu, drill, progress, keys）
-# ====================================================
-typing_group = app_commands.Group(name="typing", description="C++タイピング訓練")
-
-
-@typing_group.command(name="menu", description="今日のタイピング訓練メニューを表示します")
-async def typing_menu_command(interaction: discord.Interaction):
-    await interaction.response.send_message(typing_logic.get_daily_menu(), ephemeral=True)
-
-
-@typing_group.command(name="drill", description="ドリル本文を表示します（monkeytypeに貼り付け用）")
-@app_commands.describe(drill="表示するドリル")
-@app_commands.choices(drill=[
-    app_commands.Choice(name="A — 右小指の単独ドリル", value="A"),
-    app_commands.Choice(name="B — シフト側の数字", value="B"),
-    app_commands.Choice(name="C — C++二文字連", value="C"),
-    app_commands.Choice(name="D — 実トークン", value="D"),
-    app_commands.Choice(name="E — 英字の弱点補強（keybr）", value="E"),
-])
-async def typing_drill_command(interaction: discord.Interaction, drill: app_commands.Choice[str]):
-    await interaction.response.send_message(typing_logic.get_drill_text(drill.value), ephemeral=True)
-
-
-@typing_group.command(name="progress", description="計測履歴と目標ラインを表示します")
-async def typing_progress_command(interaction: discord.Interaction):
-    await interaction.response.send_message(typing_logic.get_progress_summary(), ephemeral=True)
-
-
-@typing_group.command(name="keys", description="記号の指の担当表を表示します")
-@app_commands.describe(layout="キーボード配列")
-@app_commands.choices(layout=[
-    app_commands.Choice(name="JIS配列（日本語配列）", value="jis"),
-    app_commands.Choice(name="US配列（英語配列）", value="us"),
-])
-async def typing_keys_command(interaction: discord.Interaction, layout: app_commands.Choice[str] = None):
-    layout_value = layout.value if layout else "jis"
-    await interaction.response.send_message(typing_logic.get_key_guide(layout_value), ephemeral=True)
-
-
-tree.add_command(typing_group)
 
 
 # 🧪 デバッグ用コマンド
@@ -1293,7 +241,7 @@ async def test_reminder_command(interaction: discord.Interaction):
 
     # 曜日に関わらず、週間サマリーもテスト発火できるようにする
     if task_channel:
-        summary_msg = study_logic.get_weekly_summary()
+        summary_msg = horse_logic.get_weekly_summary()
         completed, scheduled = training_logic.get_weekly_training_rate()
         summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
         summary_msg += exam_logic.get_weekly_exam_summary()

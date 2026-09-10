@@ -5,8 +5,9 @@ import pytest
 
 os.environ.setdefault('DISCORD_TOKEN', 'dummy')  # main.pyのimport時にclient.run用のTOKEN取得で使われるだけ
 
+import bot_state
+import horse_logic
 import main
-import study_logic
 import task_logic
 
 
@@ -61,92 +62,98 @@ def test_parse_float(text, expected):
     assert main.parse_float(text) == expected
 
 
-def make_result(is_level_up=False, new_level=None, event=None, streak=1, new_badges=None):
-    """study_logic.add_exp()が返す辞書と同じ形の、テスト用の結果データを組み立てる。"""
+def make_result(gains=None, streak=1, capped=False, events=None):
+    """horse_logic.add_growth() が返す辞書と同じ形の、テスト用の結果データを組み立てる。"""
     return {
-        "is_level_up": is_level_up,
-        "new_level": new_level,
-        "event": event,
-        "earned_exp": 0,
+        "gains": gains or {},
         "streak": streak,
-        "new_badges": new_badges or [],
+        "condition": 0,
+        "capped": capped,
+        "events": events or [],
+        "horse": {"name": "テストホース"},
     }
 
 
-def test_build_event_message_no_event_no_levelup():
-    detail, public = main.build_event_message(make_result())
+def test_build_growth_message_quiet_when_nothing_happened():
+    detail, public = main.build_growth_message(make_result())
     assert detail == ''
     assert public is None
 
 
-def test_build_event_message_boss_appear():
-    detail, public = main.build_event_message(make_result(event='BOSS_APPEAR'))
-    assert 'ボス' in detail
-    assert public is not None and 'ボス' in public
+def test_build_growth_message_shows_what_went_up_privately():
+    """どの能力が上がったかは毎回の細かい進捗なので、公開告知はしない。"""
+    detail, public = main.build_growth_message(make_result(gains={'speed': 12}))
+    assert 'スピード' in detail and '+12' in detail
+    assert public is None
 
 
-def test_build_event_message_boss_damage_is_not_publicly_announced():
-    detail, public = main.build_event_message(make_result(event='BOSS_DAMAGE'))
-    assert 'ダメージ' in detail
-    assert public is None  # 通常ダメージは公開告知の対象外
+def test_build_growth_message_announces_the_cap():
+    detail, public = main.build_growth_message(make_result(capped=True))
+    assert '上限' in detail
+    assert public is not None and '上限' in public
 
 
-def test_build_event_message_level_up_and_boss_defeated_combined():
-    detail, public = main.build_event_message(make_result(is_level_up=True, new_level=5, event='BOSS_DEFEATED'))
-    assert 'Lv.5' in detail
-    assert public is not None
-    assert 'Lv.5' in public
-    assert '撃破' in public
-
-
-def test_build_event_message_streak_milestone_is_announced():
-    detail, public = main.build_event_message(make_result(streak=7))
+def test_build_growth_message_announces_streak_milestones():
+    detail, public = main.build_growth_message(make_result(streak=7))
     assert '7日連続' in detail
     assert public is not None and '7日連続' in public
 
 
-def test_build_event_message_non_milestone_streak_is_not_announced():
-    detail, public = main.build_event_message(make_result(streak=5))
+def test_build_growth_message_ignores_non_milestone_streaks():
+    _, public = main.build_growth_message(make_result(streak=5))
     assert public is None
 
 
-def test_build_event_message_new_badge_is_announced():
-    badge = {"id": "first_boss", "name": "🗡️ 初撃破の証"}
-    detail, public = main.build_event_message(make_result(new_badges=[badge]))
-    assert '初撃破の証' in detail
-    assert public is not None and '初撃破の証' in public
+def test_build_growth_message_announces_race_events():
+    detail, public = main.build_growth_message(
+        make_result(events=['🏆 勝利！ 1勝クラスへ昇級しました。']))
+    assert '昇級' in detail
+    assert public is not None and '昇級' in public
 
 
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
+    """⭕ horse_logic は厩舎データと旧RPGデータの2つを読む。両方差し替えないと
+       実データを巻き込む。"""
     monkeypatch.setattr(task_logic, 'DB_FILE', str(tmp_path / 'todo.json'))
-    monkeypatch.setattr(study_logic, 'PLAYER_DATA_FILE', str(tmp_path / 'player_data.json'))
+    monkeypatch.setattr(horse_logic, 'STABLE_FILE', str(tmp_path / 'stable.json'))
+    monkeypatch.setattr(horse_logic, 'LEGACY_PLAYER_FILE', str(tmp_path / 'player_data.json'))
 
 
 # ====================================================
-# 過去問演習 → RPGのreading EXPへの自動連携
+# 過去問演習 → 賢さの調教への自動連携
 # ====================================================
-# 以前は演習記録(exam_logic)とRPGのEXP(study_logic)が完全に独立しており、
-# 両方欲しい場合は同じ勉強内容を「📚インプットを報告」で二重入力する必要があった。
+# ⭕ 演習記録(exam_logic)と育成が独立していると、同じ勉強内容を
+#    「📚インプットを報告」で二重入力する必要が出る。
 
-def test_process_exam_completion_grants_reading_exp():
-    detail, public = main.process_exam_completion(total=20)  # 20問 × 1.5分 = 30分
-    assert 'EXP' in detail
-    data = study_logic.load_player_data()
-    assert data['reading'] == 30
+def test_process_exam_completion_trains_wit():
+    detail, _ = main.process_exam_completion(total=20)  # 20問 × 1.5分 = 30分
+    assert '賢さ' in detail
+    assert horse_logic.load_stable()['current']['growth']['wit'] == 30
 
 
 def test_process_exam_completion_uses_rounded_minutes():
-    detail, _ = main.process_exam_completion(total=3)  # 3問 × 1.5分 = 4.5分 → 4分か5分に丸め
-    data = study_logic.load_player_data()
-    assert data['reading'] in (4, 5)
+    main.process_exam_completion(total=3)   # 3問 × 1.5分 = 4.5分 → 4分か5分に丸め
+    assert horse_logic.load_stable()['current']['growth']['wit'] in (4, 5)
 
 
-def test_process_exam_completion_zero_questions_grants_nothing():
+def test_process_exam_completion_zero_questions_trains_nothing():
     detail, public = main.process_exam_completion(total=0)
     assert detail == ''
     assert public is None
-    assert study_logic.load_player_data()['reading'] == 0
+    assert horse_logic.load_stable()['current']['growth']['wit'] == 0
+
+
+def test_process_task_completion_trains_the_matching_parameter():
+    detail, _ = main.process_task_completion('programming')
+    assert 'スピード' in detail
+    growth = horse_logic.load_stable()['current']['growth']
+    assert growth['speed'] == bot_state.TASK_COMPLETE_MINUTES
+
+
+def test_process_task_completion_without_a_category_does_nothing():
+    detail, public = main.process_task_completion(None)
+    assert detail == '' and public is None
 
 
 def test_build_deadline_reminders_includes_tasks_within_three_days():

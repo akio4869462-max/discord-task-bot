@@ -507,6 +507,44 @@ def format_horse(data=None, today=None):
     return '\n'.join(lines)
 
 
+def get_weekly_summary(data=None, today=None, save=True):
+    """週間サマリー。前回からの差分を出し、次回のためのスナップショットを更新します。"""
+    data = data if data is not None else load_stable()
+    today = today or datetime.now(JST).date()
+    horse = data['current']
+    snap = data.get('weekly_snapshot') or {}
+
+    minutes = total_minutes(horse['growth'])
+    rec = horse['record']
+    week_minutes = minutes - snap.get('minutes', 0)
+    week_starts = rec['starts'] - snap.get('starts', 0)
+    week_wins = rec['win'] - snap.get('wins', 0)
+
+    msg = "📅 **【週間サマリー】**\n"
+    msg += f"今週の調教: {week_minutes / 60:.1f}時間\n"
+    if week_starts > 0:
+        msg += f"今週の出走: {week_starts}戦{week_wins}勝\n"
+    msg += f"🐎 {horse['name']}（{horse['class']}） 通算 {rec['starts']}戦{rec['win']}勝"
+    msg += f" ／ 残り{max(0, RETIRE_STARTS - rec['starts'])}戦\n"
+
+    prev = snap.get('last_week_minutes')
+    if prev:
+        diff = int((week_minutes - prev) / prev * 100)
+        if diff > 0:
+            msg += f"📈 先週より {diff}% 多く積めました。\n"
+        elif diff < 0:
+            msg += f"📉 先週より {abs(diff)}% 少なめでした。\n"
+
+    # ⭕ 世代交代をまたいでも差分が壊れないよう、スナップショットは撮り直す。
+    data['weekly_snapshot'] = {
+        'minutes': minutes, 'starts': rec['starts'], 'wins': rec['win'],
+        'last_week_minutes': max(0, week_minutes), 'date': today.isoformat(),
+    }
+    if save:
+        save_stable(data)
+    return msg
+
+
 def format_races(day, races):
     """出走できるレースの一覧を整形します。"""
     if not races:
