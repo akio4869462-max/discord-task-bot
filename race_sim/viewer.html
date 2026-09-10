@@ -1,9 +1,9 @@
 <title>レース再生</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Roboto+Mono:wght@400;500;700&display=swap">
 <style>
   :root {
-    --paper: #f6f7f4;
-    --surface: #fffffe;
+    --paper: #f4f6f2;
+    --surface: #ffffff;
     --ink: #15201a;
     --ink-2: #3d4c44;
     --ink-3: #6b7a71;
@@ -13,16 +13,11 @@
     --turf-soft: #e4ede7;
     --silk: #b83a26;
     --gold: #9a7418;
-    --track-turf: #4a8b5f;
-    --track-turf-2: #43804f;
-    --track-dirt: #a98a63;
-    --track-dirt-2: #9d7d57;
-    --rail: #f4f6f2;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --paper: #121714;
-      --surface: #1a211d;
+      --paper: #101512;
+      --surface: #19201c;
       --ink: #e8ede9;
       --ink-2: #b3c0b8;
       --ink-3: #849089;
@@ -32,16 +27,11 @@
       --turf-soft: #1f2f27;
       --silk: #e8836e;
       --gold: #d1a94a;
-      --track-turf: #2f5b3f;
-      --track-turf-2: #2a5238;
-      --track-dirt: #6b573e;
-      --track-dirt-2: #614e37;
-      --rail: #d6ddd4;
     }
   }
   :root[data-theme="dark"] {
-    --paper: #121714;
-    --surface: #1a211d;
+    --paper: #101512;
+    --surface: #19201c;
     --ink: #e8ede9;
     --ink-2: #b3c0b8;
     --ink-3: #849089;
@@ -51,11 +41,6 @@
     --turf-soft: #1f2f27;
     --silk: #e8836e;
     --gold: #d1a94a;
-    --track-turf: #2f5b3f;
-    --track-turf-2: #2a5238;
-    --track-dirt: #6b573e;
-    --track-dirt-2: #614e37;
-    --rail: #d6ddd4;
   }
 
   body {
@@ -65,90 +50,124 @@
     font-size: 15px;
     line-height: 1.7;
   }
-  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 64px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 18px 56px; }
 
-  header { margin-bottom: 18px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; margin-bottom: 14px; }
   .race-title {
     font-family: "Shippori Mincho B1", "Yu Mincho", serif;
-    font-size: clamp(22px, 4vw, 30px); font-weight: 700; margin: 0 0 6px;
-    letter-spacing: .02em;
+    font-size: clamp(20px, 3vw, 28px); font-weight: 700; margin: 0; letter-spacing: .02em;
   }
   .race-meta {
-    display: flex; flex-wrap: wrap; gap: 4px 18px;
+    display: flex; flex-wrap: wrap; gap: 3px 16px;
     font-family: "Roboto Mono", monospace; font-size: 12.5px; color: var(--ink-3);
   }
   .race-meta b { color: var(--ink-2); font-weight: 500; }
 
   /* ---- 走路 ---- */
-  .stage { position: relative; border: 1px solid var(--rule-strong); background: var(--surface); }
-  canvas { display: block; width: 100%; height: auto; }
-  /* ⭕ ペースと残り距離はキャンバスに直接描く。HTMLで重ねていたときは走路の外の
-     白地に白文字が乗り、まったく見えなかった。 */
+  .stage {
+    position: relative; overflow: hidden;
+    border: 1px solid var(--rule-strong); background: #223028;
+    aspect-ratio: 16 / 9;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .overlay { position: absolute; inset: 0; pointer-events: none; color: #fff; }
+  .remain {
+    position: absolute; top: 3.5%; left: 2.4%;
+    font-family: "Roboto Mono", monospace;
+    text-shadow: 0 2px 10px rgba(0,0,0,.7);
+  }
+  .remain .n { font-size: clamp(26px, 4.4vw, 52px); font-weight: 700; line-height: 1; letter-spacing: -.01em; }
+  .remain .u { font-size: clamp(11px, 1.4vw, 16px); margin-left: 4px; opacity: .85; }
+  .remain .label { font-size: clamp(10px, 1.2vw, 13px); opacity: .8; display: block; margin-bottom: 2px; }
+  .clock-big {
+    font-family: "Roboto Mono", monospace; font-size: clamp(14px, 2vw, 24px);
+    opacity: .9; margin-top: 4px;
+  }
+  .pace-chip {
+    position: absolute; top: 3.5%; right: 2.4%;
+    font-family: "Roboto Mono", monospace; font-size: clamp(10px, 1.3vw, 14px);
+    background: rgba(0,0,0,.42); padding: 5px 12px; border-radius: 2px;
+    text-shadow: none;
+  }
+  .live {
+    position: absolute; left: 2.4%; top: 34%; width: min(28%, 230px);
+    display: grid; gap: 2px; margin: 0; padding: 0;
+  }
+  .live li {
+    display: grid; grid-template-columns: 18px 22px 1fr auto; gap: 6px; align-items: center;
+    background: rgba(12,20,15,.66); padding: 3px 8px; border-radius: 2px;
+    font-size: clamp(9px, 1.1vw, 12.5px); list-style: none;
+  }
+  .live li.mine { background: rgba(150,44,26,.82); }
+  .live .rank { font-family: "Roboto Mono", monospace; opacity: .75; text-align: right; }
+  .live .chip {
+    display: grid; place-items: center; border-radius: 2px; height: 17px;
+    font-family: "Roboto Mono", monospace; font-size: 11px; font-weight: 700;
+    border: 1px solid rgba(0,0,0,.4);
+  }
+  .live .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .live .gp { font-family: "Roboto Mono", monospace; font-size: 11px; opacity: .8; }
+  .call {
+    position: absolute; left: 2.4%; right: 2.4%; bottom: 4%;
+    background: rgba(12,20,15,.72); padding: 8px 14px; border-radius: 2px;
+    font-size: clamp(11px, 1.5vw, 16px);
+  }
+
   /* ---- 操作 ---- */
   .controls {
-    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 12px 0; border-bottom: 1px solid var(--rule);
   }
   button {
-    font: inherit; font-size: 13.5px; padding: 6px 14px; cursor: pointer;
+    font: inherit; font-size: 13px; padding: 6px 13px; cursor: pointer;
     background: var(--surface); color: var(--ink);
     border: 1px solid var(--rule-strong); border-radius: 2px;
   }
   button:hover { border-color: var(--turf); }
   button:focus-visible { outline: 2px solid var(--turf); outline-offset: 2px; }
-  button.primary { background: var(--turf); color: var(--paper); border-color: var(--turf); font-weight: 500; min-width: 92px; }
-  .speeds { display: flex; gap: 0; margin-left: auto; }
-  .speeds button { border-radius: 0; margin-left: -1px; min-width: 48px; }
-  .speeds button[aria-pressed="true"] { background: var(--turf-soft); border-color: var(--turf); color: var(--turf); font-weight: 700; }
-  input[type=range] { flex: 1 1 180px; min-width: 140px; accent-color: var(--turf); }
-  .clock { font-family: "Roboto Mono", monospace; font-size: 13px; color: var(--ink-2); min-width: 62px; }
+  button.primary { background: var(--turf); color: var(--paper); border-color: var(--turf); font-weight: 500; min-width: 104px; }
+  .group { display: flex; }
+  .group button { border-radius: 0; margin-left: -1px; min-width: 52px; }
+  .group button[aria-pressed="true"] { background: var(--turf-soft); border-color: var(--turf); color: var(--turf); font-weight: 700; }
+  .group.cams button { min-width: 62px; }
+  input[type=range] { flex: 1 1 200px; min-width: 120px; accent-color: var(--turf); }
+  .clock { font-family: "Roboto Mono", monospace; font-size: 13px; color: var(--ink-2); min-width: 58px; }
+  .spacer { flex: 1 1 auto; }
 
-  /* ---- 実況の並び ---- */
-  .board { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; margin-top: 16px; }
-  @media (max-width: 640px) { .board { grid-template-columns: 1fr; } }
+  /* ---- 出走表・結果 ---- */
+  .board { margin-top: 18px; }
   .board h3 {
     font-size: 11px; font-family: "Roboto Mono", monospace; letter-spacing: .12em;
-    color: var(--ink-3); font-weight: 400; margin: 0 0 8px; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 400; margin: 0 0 8px;
   }
-  ol.order { list-style: none; margin: 0; padding: 0; }
-  ol.order li {
-    display: grid; grid-template-columns: 22px 26px 1fr auto; gap: 8px; align-items: center;
-    padding: 3px 0; border-bottom: 1px solid var(--rule);
-    font-size: 13.5px;
-  }
-  ol.order li:last-child { border-bottom: none; }
-  .pos { font-family: "Roboto Mono", monospace; color: var(--ink-3); font-size: 12px; text-align: right; }
-  .silk {
-    width: 22px; height: 18px; border-radius: 2px; display: grid; place-items: center;
-    font-family: "Roboto Mono", monospace; font-size: 11px; font-weight: 500;
-    border: 1px solid rgba(0,0,0,.35);
-  }
-  .hname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  li.mine .hname { font-weight: 700; color: var(--silk); }
-  .gap-m { font-family: "Roboto Mono", monospace; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-
-  /* ---- 結果 ---- */
-  .result-head { display: flex; align-items: baseline; gap: 14px; margin-top: 30px; }
-  .result-head h3 { margin: 0; font-family: "Shippori Mincho B1", serif; font-size: 18px; }
-  .scroller { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); margin-top: 10px; }
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th, td { padding: 6px 11px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
   thead th {
     font-family: "Roboto Mono", monospace; font-size: 10.5px; letter-spacing: .08em;
     color: var(--ink-3); font-weight: 400; border-bottom: 1px solid var(--rule-strong);
   }
   tbody tr:last-child td { border-bottom: none; }
   .num { font-family: "Roboto Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; }
+  td .chip {
+    display: inline-grid; place-items: center; width: 22px; height: 17px; border-radius: 2px;
+    font-family: "Roboto Mono", monospace; font-size: 11px; font-weight: 700;
+    border: 1px solid rgba(0,0,0,.35);
+  }
   tr.win td { background: var(--turf-soft); font-weight: 700; }
   tr.mine td { color: var(--silk); }
+  .result-head { display: flex; align-items: baseline; gap: 14px; margin-top: 26px; }
+  .result-head h3 { margin: 0; font-family: "Shippori Mincho B1", serif; font-size: 17px; }
   footer {
-    margin-top: 28px; font-family: "Roboto Mono", monospace;
+    margin-top: 24px; font-family: "Roboto Mono", monospace;
     font-size: 11.5px; color: var(--ink-3);
   }
+  @media (prefers-reduced-motion: reduce) { .live li { transition: none; } }
 </style>
 
 <script id="race-data" type="application/json">
-{"race": {"name": "デモレース", "course": "東京", "surface": "芝", "distance": 1600, "cond": "良", "class": "2勝"}, "pace": 0.0, "base_time": 94.0, "horses": [{"no": 1, "name": "サンプルホース", "style": "逃げ", "is_player": false, "finish": 1, "time": 94.0, "margin": 0.0, "last3f": 34.5, "splits": [12.6, 11.2, 11.5, 11.8, 12.0, 11.6, 11.5, 11.8], "passing": [1, 1, 1, 1], "trouble": null}]}
+{"race": {"name": "デモレース", "course": "東京", "surface": "芝", "distance": 1600, "cond": "良", "class": "2勝"}, "seed": 0, "pace": 0.0, "base_time": 94.0, "horses": [{"no": 1, "name": "サンプルホース", "style": "逃げ", "is_player": false, "finish": 1, "time": 94.0, "margin": 0.0, "last3f": 34.5, "splits": [12.6, 11.2, 11.5, 11.8, 12.0, 11.6, 11.5, 11.8], "passing": [1, 1, 1, 1], "trouble": null}]}
 </script>
 
 <div class="wrap">
@@ -158,7 +177,17 @@
   </header>
 
   <div class="stage">
-    <canvas id="track" width="1720" height="660"></canvas>
+    <canvas id="track" width="1600" height="900"></canvas>
+    <div class="overlay">
+      <div class="remain">
+        <span class="label">残り</span>
+        <span class="n" id="remain-n">0</span><span class="u">m</span>
+        <div class="clock-big" id="clock-big">0.0</div>
+      </div>
+      <div class="pace-chip" id="pace-chip"></div>
+      <ol class="live" id="live"></ol>
+      <div class="call" id="call"></div>
+    </div>
   </div>
 
   <div class="controls">
@@ -166,21 +195,24 @@
     <button id="restart">最初から</button>
     <span class="clock" id="clock">0.0s</span>
     <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="再生位置">
-    <span class="speeds" role="group" aria-label="再生速度">
-      <button data-speed="0.5">×0.5</button>
+    <span class="group cams" role="group" aria-label="カメラ">
+      <button data-cam="chase" aria-pressed="true">追走</button>
+      <button data-cam="wide">全体</button>
+    </span>
+    <span class="group" role="group" aria-label="再生速度">
       <button data-speed="1" aria-pressed="true">×1</button>
       <button data-speed="2">×2</button>
+      <button data-speed="4">×4</button>
     </span>
   </div>
 
   <div class="board">
-    <div>
-      <h3>現在の隊列</h3>
-      <ol class="order" id="order"></ol>
-    </div>
-    <div>
-      <h3>出走表</h3>
-      <ol class="order" id="card"></ol>
+    <h3>出走表</h3>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>枠</th><th>馬番</th><th>馬名</th><th>脚質</th><th>毛色</th></tr></thead>
+        <tbody id="card-body"></tbody>
+      </table>
     </div>
   </div>
 
@@ -188,7 +220,7 @@
     <h3>結果</h3>
     <button id="reveal">結果を表示</button>
   </div>
-  <div class="scroller" id="result-wrap" hidden>
+  <div class="scroller" id="result-wrap" hidden style="margin-top:10px">
     <table>
       <thead>
         <tr><th>着</th><th>馬番</th><th>馬名</th><th class="num">タイム</th><th class="num">着差</th>
@@ -207,289 +239,551 @@
 
   const DATA = JSON.parse(document.getElementById('race-data').textContent);
   const RACE = DATA.race;
-  const HORSES = DATA.horses.slice().sort((a, b) => a.no - b.no);
+  const HORSES = DATA.horses.slice().sort(function (a, b) { return a.no - b.no; });
   const N = HORSES.length;
   const DISTANCE = RACE.distance;
+  const IS_DIRT = RACE.surface === 'ダ';
 
-  // JRAの枠番の色。馬番と頭数から枠を決める。
-  // ⭕ 枠は均等割りで、余りは外枠（大きい番号）から1頭ずつ足す。16頭なら各枠2頭、
-  //    18頭なら7枠と8枠だけ3頭になる。
-  const WAKU_COLORS = [
-    { bg: '#ffffff', fg: '#1a1a1a' }, { bg: '#1c1c1c', fg: '#ffffff' },
-    { bg: '#d8402f', fg: '#ffffff' }, { bg: '#2f6cc4', fg: '#ffffff' },
-    { bg: '#f0c419', fg: '#1a1a1a' }, { bg: '#2f9e5e', fg: '#ffffff' },
-    { bg: '#f07f2f', fg: '#1a1a1a' }, { bg: '#f2a3bd', fg: '#1a1a1a' }
+  // ====================================================
+  // 馬のデータを描画用に整える
+  // ====================================================
+  // JRAの枠番の色。枠は均等割りで、余りは外枠から1頭ずつ足す。
+  const WAKU = [
+    { bg: '#ffffff', fg: '#1a1a1a', name: '白' }, { bg: '#1c1c1c', fg: '#ffffff', name: '黒' },
+    { bg: '#d8402f', fg: '#ffffff', name: '赤' }, { bg: '#2f6cc4', fg: '#ffffff', name: '青' },
+    { bg: '#f0c419', fg: '#1a1a1a', name: '黄' }, { bg: '#2f9e5e', fg: '#ffffff', name: '緑' },
+    { bg: '#f07f2f', fg: '#1a1a1a', name: '橙' }, { bg: '#f2a3bd', fg: '#1a1a1a', name: '桃' }
   ];
-
-  function wakuOf(no, fieldSize) {
-    const counts = new Array(8).fill(Math.floor(fieldSize / 8));
-    for (let i = 0; i < fieldSize % 8; i++) counts[7 - i] += 1;
+  function wakuOf(no, size) {
+    const counts = new Array(8).fill(Math.floor(size / 8));
+    for (let i = 0; i < size % 8; i++) counts[7 - i] += 1;
     let seen = 0;
-    for (let w = 0; w < 8; w++) {
-      seen += counts[w];
-      if (no <= seen) return w;
-    }
+    for (let w = 0; w < 8; w++) { seen += counts[w]; if (no <= seen) return w; }
     return 7;
   }
 
-  // 区間タイムの累積。ある時刻にどこを走っているかを引くために使う。
-  HORSES.forEach(function (h) {
-    const cum = [];
+  // 毛色。JRAの実際の割合におおよそ合わせ、馬名から決定的に決める。
+  const COATS = [
+    { p: 0.45, body: '#6b4226', dark: '#4a2c18', mane: '#3a2213', name: '鹿毛' },
+    { p: 0.20, body: '#472e1d', dark: '#31200f', mane: '#241609', name: '黒鹿毛' },
+    { p: 0.20, body: '#9c5f2e', dark: '#7d4a20', mane: '#c08a4a', name: '栗毛' },
+    { p: 0.08, body: '#b6b1ab', dark: '#96918b', mane: '#e9e6e1', name: '芦毛' },
+    { p: 0.05, body: '#34251b', dark: '#231810', mane: '#191009', name: '青鹿毛' },
+    { p: 0.02, body: '#7a4520', dark: '#5d3416', mane: '#40230d', name: '栃栗毛' }
+  ];
+  function coatOf(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = (hash * 131 + name.charCodeAt(i)) % 1000003;
+    let r = (hash % 1000) / 1000, acc = 0;
+    for (let i = 0; i < COATS.length; i++) { acc += COATS[i].p; if (r <= acc) return COATS[i]; }
+    return COATS[0];
+  }
+
+  HORSES.forEach(function (h, i) {
     let acc = 0;
-    h.splits.forEach(function (s) { acc += s; cum.push(acc); });
-    h.cum = cum;
+    h.cum = h.splits.map(function (s) { acc += s; return acc; });
     h.sectionLen = DISTANCE / h.splits.length;
     h.waku = wakuOf(h.no, N);
-    h.color = WAKU_COLORS[h.waku];
+    h.color = WAKU[h.waku];
+    h.coat = coatOf(h.name);
+    h.lane = i;                         // 走路の内から外への位置
   });
-
   const MAX_TIME = Math.max.apply(null, HORSES.map(function (h) { return h.time; }));
   const PACE_LABEL = DATA.pace > 0.15 ? 'ハイペース' : (DATA.pace < -0.15 ? 'スローペース' : '平均ペース');
 
-  /** その時刻に何メートル地点を走っているか。区間の中は等速とみなして補間する。 */
+  /** その時刻に何メートル地点にいるか。区間の中は等速とみなして補間する。 */
   function distanceAt(h, t) {
     if (t >= h.time) return DISTANCE;
     let i = 0;
     while (i < h.cum.length && h.cum[i] <= t) i++;
     const prev = i === 0 ? 0 : h.cum[i - 1];
     const split = h.splits[i];
-    const within = split > 0 ? (t - prev) / split : 0;
-    return Math.min(DISTANCE, (i + within) * h.sectionLen);
+    return Math.min(DISTANCE, (i + (split > 0 ? (t - prev) / split : 0)) * h.sectionLen);
   }
 
-  // ---- 描画 ----
+  // ====================================================
+  // 追走カメラ（後方から見た3D）
+  // ====================================================
+  // ⭕ 真横から見る形も試したが、走路が奥へ抜けていく後方視点のほうがはるかに立体に
+  //    見える。ただし遠近をつけると着差が目で読めなくなるので、「全体」カメラと
+  //    左の隊列オーバーレイで正確な差を担保する。
   const canvas = document.getElementById('track');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  // ⭕ 走路をキャンバスのほぼ全面に取る。上に余白を作って距離ラベルやHUDを置いたときは、
-  //    白地に白文字で何も見えなかった。文字はすべて緑（走路）の上に置く。
-  const TRACK_TOP = 58, TRACK_BOTTOM = H - 104;
-  const LANE_H = (TRACK_BOTTOM - TRACK_TOP - 30) / N;
-  const R = Math.max(8, Math.min(15, LANE_H / 2 - 2));   // 馬が縦に重ならない大きさ
+
+  const FOCAL = 1420;          // 焦点距離。大きいほど望遠になる
+  const CAM_HEIGHT = 3.4;      // カメラの高さ(m)
+  const CAM_BACK = 14;         // 最後方の馬の何m後ろから見るか
+  // ⭕ カメラを走路の内側へ寄せ、馬群を画面の右半分に置く。中央に置くと
+  //    馬が左右に広がってしまい、左の隊列オーバーレイと重なって両方見づらくなる。
+  const CAM_LAT = -7;
+  const HORIZON_Y = H * 0.30;
+  const TRACK_W = 24;          // 走路の幅(m)
+  const CURVE = 0.0016;        // 走路の曲がり。奥ほど横にずれる
+  const STRIDE_M = 7.0;        // ひと完歩で進む距離
 
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  function drawTrack(camStart, mPerPx) {
-    const isDirt = RACE.surface === 'ダ';
-    ctx.fillStyle = cssVar(isDirt ? '--track-dirt' : '--track-turf');
-    ctx.fillRect(0, TRACK_TOP, W, TRACK_BOTTOM - TRACK_TOP);
+  /** 走路上の点(距離d, 横位置lat[m]) を画面座標へ落とす。 */
+  function project(d, lat, camD) {
+    const depth = d - camD;
+    if (depth <= 1.2) return null;
+    const k = FOCAL / depth;
+    const bend = CURVE * depth * depth;
+    return { x: W / 2 + (lat - CAM_LAT + bend) * k, y: HORIZON_Y + CAM_HEIGHT * k, k: k, depth: depth };
+  }
 
-    // 芝目／ならしの縞。走っている感じを出すために地面側を動かす。
-    ctx.fillStyle = cssVar(isDirt ? '--track-dirt-2' : '--track-turf-2');
-    const stripe = 24 / mPerPx;
-    const offset = (camStart / 24 % 1) * stripe;
-    for (let x = -offset; x < W; x += stripe * 2) {
-      ctx.fillRect(x, TRACK_TOP, stripe, TRACK_BOTTOM - TRACK_TOP);
+  function laneLat(lane) {
+    return -TRACK_W / 2 + 1.6 + (TRACK_W - 3.2) * (N > 1 ? lane / (N - 1) : 0.5);
+  }
+
+  // ---- 空・遠景 ----
+  function drawSky(camD) {
+    const sky = ctx.createLinearGradient(0, 0, 0, HORIZON_Y + 30);
+    sky.addColorStop(0, '#7f9fb8');
+    sky.addColorStop(1, '#cddae0');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, HORIZON_Y + 30);
+
+    // 遠くの木立とスタンド。カメラが進むとゆっくり流れる。
+    const shift = -camD * 1.1;
+    ctx.fillStyle = '#4d6b52';
+    for (let i = 0; i < 70; i++) {
+      const x = ((i * 137 + shift * 0.35) % (W + 400)) - 200;
+      const hgt = 26 + (i * 17) % 30;
+      ctx.beginPath();
+      ctx.ellipse(x, HORIZON_Y - hgt * 0.35, 30, hgt * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
+    ctx.fillStyle = 'rgba(44,54,62,.85)';
+    ctx.fillRect(0, HORIZON_Y - 12, W, 14);
+  }
 
-    // ラチ
-    ctx.fillStyle = cssVar('--rail');
-    ctx.fillRect(0, TRACK_TOP - 6, W, 6);
-    ctx.fillRect(0, TRACK_BOTTOM, W, 6);
+  // ---- 走路 ----
+  function drawGround(camD) {
+    // 芝（またはダート）の面。遠いほど明るくしてかすませる。
+    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    ctx.fillRect(0, HORIZON_Y, W, H - HORIZON_Y);
 
-    // 200mごとのハロン棒と残り距離。ラベルは走路の中に置く。
-    ctx.font = '500 21px "Roboto Mono", monospace';
+    const fade = ctx.createLinearGradient(0, HORIZON_Y, 0, HORIZON_Y + (H - HORIZON_Y) * 0.55);
+    fade.addColorStop(0, IS_DIRT ? 'rgba(200,180,150,.55)' : 'rgba(150,190,160,.5)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, HORIZON_Y, W, H - HORIZON_Y);
+
+    drawStripes(camD);
+    drawRail(camD, -TRACK_W / 2);
+    drawRail(camD, TRACK_W / 2);
+    drawTrees(camD);
+    drawFurlongs(camD);
+    drawFinish(camD);
+  }
+
+  function drawStripes(camD) {
+    const band = 25;
+    const start = Math.floor(camD / band) * band;
+    ctx.fillStyle = IS_DIRT ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.05)';
+    for (let d = start; d < camD + 420; d += band * 2) {
+      const a = project(d, -TRACK_W / 2, camD), b = project(d + band, -TRACK_W / 2, camD);
+      const c = project(d + band, TRACK_W / 2, camD), e = project(d, TRACK_W / 2, camD);
+      if (!a || !b || !c || !e) continue;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawRail(camD, lat) {
+    ctx.strokeStyle = 'rgba(245,248,243,.95)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    let started = false;
+    for (let d = camD + 2; d < camD + 420; d += 6) {
+      const p = project(d, lat, camD);
+      if (!p) continue;
+      const top = p.y - 1.15 * p.k;         // ラチの高さ 1.15m
+      if (!started) { ctx.moveTo(p.x, top); started = true; } else ctx.lineTo(p.x, top);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(245,248,243,.8)';
+    const step = 12;
+    const first = Math.ceil((camD + 4) / step) * step;
+    for (let d = first; d < camD + 400; d += step) {
+      const p = project(d, lat, camD);
+      if (!p) continue;
+      ctx.fillRect(p.x - 0.09 * p.k, p.y - 1.15 * p.k, 0.18 * p.k, 1.15 * p.k);
+    }
+  }
+
+  function drawTrees(camD) {
+    if (IS_DIRT) return;
+    const step = 45;
+    const first = Math.floor(camD / step) * step;
+    for (let d = first + step * 8; d > camD + 6; d -= step) {
+      const p = project(d, TRACK_W / 2 + 14, camD);
+      // ⭕ 近すぎる木は巨大になって走路に生えて見えるので描かない。
+      if (!p || p.depth < 26 || p.x < -200 || p.x > W + 200) continue;
+      const th = 5.5 * p.k;
+      ctx.fillStyle = '#5a4632';
+      ctx.fillRect(p.x - 0.22 * p.k, p.y - th * 0.45, 0.44 * p.k, th * 0.45);
+      ctx.fillStyle = '#3d7a49';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - th * 0.62, 2.0 * p.k, 2.5 * p.k, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.10)';
+      ctx.beginPath();
+      ctx.ellipse(p.x - 0.6 * p.k, p.y - th * 0.75, 1.1 * p.k, 1.3 * p.k, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawFurlongs(camD) {
     ctx.textAlign = 'center';
     for (let d = 0; d <= DISTANCE; d += 200) {
-      const x = (d - camStart) / mPerPx;
-      if (x < -80 || x > W + 80) continue;
-      const remain = DISTANCE - d;
-      ctx.fillStyle = 'rgba(255,255,255,.28)';
-      ctx.fillRect(x - 1.5, TRACK_TOP, 3, TRACK_BOTTOM - TRACK_TOP);
-      ctx.fillStyle = 'rgba(255,255,255,.80)';
-      ctx.fillText(remain === 0 ? 'ゴール' : remain + 'm', x, TRACK_TOP + 26);
-    }
-
-    // スタート地点のゲート
-    const sx = (0 - camStart) / mPerPx;
-    if (sx > -30 && sx < W + 30) {
-      ctx.fillStyle = 'rgba(255,255,255,.55)';
-      ctx.fillRect(sx - 2, TRACK_TOP, 4, TRACK_BOTTOM - TRACK_TOP);
-    }
-
-    // ゴール板
-    const gx = (DISTANCE - camStart) / mPerPx;
-    if (gx > -40 && gx < W + 40) {
-      ctx.fillStyle = '#e02b1d';
-      ctx.fillRect(gx - 3, TRACK_TOP - 6, 6, TRACK_BOTTOM - TRACK_TOP + 12);
+      if (d < camD + 3 || d > camD + 400) continue;
+      const p = project(d, TRACK_W / 2 + 1.4, camD);
+      if (!p) continue;
+      const hgt = 2.6 * p.k;
+      ctx.fillStyle = '#f2f4f0';
+      ctx.fillRect(p.x - 0.12 * p.k, p.y - hgt, 0.24 * p.k, hgt);
+      ctx.fillStyle = '#e8402c';
+      ctx.fillRect(p.x - 0.12 * p.k, p.y - hgt, 0.24 * p.k, hgt * 0.22);
+      if (p.k > 12) {
+        ctx.fillStyle = 'rgba(255,255,255,.9)';
+        ctx.font = '700 ' + Math.max(10, Math.round(0.26 * p.k)) + 'px "Roboto Mono", monospace';
+        ctx.fillText(String(DISTANCE - d), p.x, p.y - hgt - 6);
+      }
     }
   }
 
-  function drawHorses(camStart, mPerPx, t) {
-    HORSES.forEach(function (h, i) {
-      const d = distanceAt(h, t);
-      const x = (d - camStart) / mPerPx;
-      const y = TRACK_TOP + 38 + LANE_H * (i + 0.5);
+  function drawFinish(camD) {
+    if (DISTANCE < camD + 2 || DISTANCE > camD + 420) return;
+    const a = project(DISTANCE, -TRACK_W / 2, camD), b = project(DISTANCE, TRACK_W / 2, camD);
+    if (!a || !b) return;
+    ctx.strokeStyle = 'rgba(255,255,255,.95)';
+    ctx.lineWidth = Math.max(2, 0.35 * a.k);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    // ゴール板
+    [a, b].forEach(function (p) {
+      ctx.fillStyle = '#e8402c';
+      ctx.fillRect(p.x - 0.18 * p.k, p.y - 3.4 * p.k, 0.36 * p.k, 3.4 * p.k);
+    });
+  }
 
-      // 影
+  // ---- 馬（後方から見たかたち） ----
+  function drawHorseRear(p, h, phase, lateralOffset) {
+    const k = p.k;
+    const S = k / 30;                         // 体高1.6m前後に相当する大きさ
+    const bob = Math.sin(phase * 2) * 0.9 * S;
+    const x = p.x, y = p.y + bob;
+    const coat = h.coat;
+    const skew = Math.max(-1, Math.min(1, lateralOffset / 12));   // 中央から外れるほど斜めに見える
+
+    // 後脚。左右で位相をずらす。
+    ctx.strokeStyle = coat.mane;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 3.4 * S;
+    [-1, 1].forEach(function (side, idx) {
+      const a = phase + idx * Math.PI;
+      const swing = Math.sin(a);
+      const hipX = x + side * 5.5 * S, hipY = y - 15 * S;
+      const kneeX = hipX + side * 1.5 * S + skew * 2 * S, kneeY = hipY + 8 * S;
+      const hoofX = kneeX + swing * 4 * S, hoofY = y - Math.max(0, swing) * 5 * S;
       ctx.beginPath();
-      ctx.ellipse(x - 2, y + R * 0.8, R, R / 3, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,0,0,.22)';
-      ctx.fill();
-
-      if (h.is_player) {
-        ctx.beginPath();
-        ctx.arc(x, y, R + 6, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffd45e';
-        ctx.lineWidth = 4;
-        ctx.stroke();
-      }
-
-      ctx.beginPath();
-      ctx.arc(x, y, R, 0, Math.PI * 2);
-      ctx.fillStyle = h.color.bg;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,.5)';
-      ctx.lineWidth = 1.5;
+      ctx.moveTo(hipX, hipY); ctx.lineTo(kneeX, kneeY); ctx.lineTo(hoofX, hoofY);
       ctx.stroke();
+    });
 
+    // 胴（後ろから見たトモ）
+    ctx.fillStyle = coat.body;
+    ctx.beginPath();
+    ctx.ellipse(x + skew * 2 * S, y - 20 * S, 8.5 * S, 11 * S, skew * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = coat.dark;                       // 尻の陰影
+    ctx.beginPath();
+    ctx.ellipse(x + skew * 2 * S - 3.4 * S, y - 20 * S, 4.2 * S, 10 * S, skew * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 前が少し見える（斜めのとき）
+    if (Math.abs(skew) > 0.15) {
+      ctx.fillStyle = coat.body;
+      ctx.beginPath();
+      ctx.ellipse(x + skew * 12 * S, y - 22 * S, 5 * S, 8.5 * S, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 尾
+    ctx.strokeStyle = coat.mane;
+    ctx.lineWidth = 4.2 * S;
+    ctx.beginPath();
+    ctx.moveTo(x + skew * 2 * S, y - 27 * S);
+    ctx.quadraticCurveTo(x + Math.sin(phase) * 3 * S, y - 16 * S, x + Math.sin(phase) * 5 * S, y - 6 * S);
+    ctx.stroke();
+
+    // 騎手（背中と勝負服）
+    ctx.fillStyle = h.color.bg;
+    ctx.beginPath();
+    ctx.ellipse(x + skew * 3 * S, y - 33 * S, 7.5 * S, 8 * S, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.beginPath();
+    ctx.ellipse(x + skew * 3 * S - 2.5 * S, y - 33 * S, 3 * S, 7.5 * S, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = h.color.bg;                       // ヘルメット
+    ctx.beginPath();
+    ctx.arc(x + skew * 4 * S, y - 41 * S, 4.6 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = h.color.bg;                     // 腕
+    ctx.lineWidth = 2.6 * S;
+    ctx.beginPath();
+    ctx.moveTo(x + skew * 3 * S - 5 * S, y - 33 * S);
+    ctx.lineTo(x + skew * 3 * S + 5 * S, y - 33 * S);
+    ctx.stroke();
+  }
+
+  /** 馬番のタグ。⭕ 馬体に番号を描くと奥では読めないので頭上に出す。 */
+  function drawTag(p, h, showName) {
+    const k = p.k;
+    if (k < 7) return;
+    const w = Math.max(17, 0.62 * k), hgt = Math.max(13, 0.46 * k);
+    const y = p.y - 1.75 * k;
+    ctx.fillStyle = h.color.bg;
+    ctx.strokeStyle = h.is_player ? '#ffd45e' : 'rgba(0,0,0,.45)';
+    ctx.lineWidth = h.is_player ? 2.4 : 1;
+    ctx.beginPath(); ctx.rect(p.x - w / 2, y - hgt, w, hgt);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = h.color.fg;
+    ctx.font = '700 ' + Math.round(hgt * 0.78) + 'px "Roboto Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(h.no), p.x, y - hgt / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+
+    if (showName && k > 11) {
+      ctx.font = '500 ' + Math.round(Math.max(12, 0.34 * k)) + 'px "Zen Kaku Gothic New", sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,.55)';
+      ctx.fillText(h.name, p.x + 1, y - hgt - 5);
+      ctx.fillStyle = h.is_player ? '#ffe08a' : '#ffffff';
+      ctx.fillText(h.name, p.x, y - hgt - 6);
+    }
+  }
+
+  function drawChase(t, positions, ranked) {
+    const tail = Math.min.apply(null, positions);
+    const camD = tail - CAM_BACK;
+
+    drawSky(camD);
+    drawGround(camD);
+
+    // 奥（遠い＝先頭）から描き、手前の馬が重なるようにする
+    const drawable = HORSES.map(function (h, i) {
+      return { h: h, d: positions[i], lat: laneLat(h.lane) };
+    }).sort(function (a, b) { return b.d - a.d; });
+
+    drawable.forEach(function (o) {
+      const p = project(o.d, o.lat, camD);
+      if (!p || p.x < -260 || p.x > W + 260) return;
+      const bend = CURVE * p.depth * p.depth;
+
+      ctx.beginPath();                                // 影
+      ctx.ellipse(p.x, p.y + 0.1 * p.k, 0.95 * p.k, 0.28 * p.k, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,.28)';
+      ctx.fill();
+
+      drawHorseRear(p, o.h, (o.d / STRIDE_M) * Math.PI * 2, o.lat - CAM_LAT + bend);
+      // ⭕ 上位3頭に名前を出すと、先頭が団子になったとき文字が重なって潰れる。
+      drawTag(p, o.h, o.h.is_player || o.h.currentPos === 1);
+    });
+  }
+
+  // ====================================================
+  // 全体カメラ（着差を読むための平面図）
+  // ====================================================
+  function drawWide(t, positions, ranked) {
+    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    ctx.fillRect(0, 0, W, H);
+
+    const lead = Math.max.apply(null, positions);
+    const tailD = Math.min.apply(null, positions);
+    const spread = Math.max(40, (lead - tailD) * 1.4);
+    const mPerPx = spread / (W * 0.6);
+    const camStart = lead - W * 0.74 * mPerPx;
+    const top = H * 0.10, bottom = H * 0.86;
+    const laneH = (bottom - top) / N;
+
+    ctx.fillStyle = IS_DIRT ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.06)';
+    const stripe = 25 / mPerPx;
+    for (let x = -((camStart / 25 % 1) * stripe); x < W; x += stripe * 2) {
+      ctx.fillRect(x, top, stripe, bottom - top);
+    }
+    ctx.fillStyle = 'rgba(245,248,243,.9)';
+    ctx.fillRect(0, top - 5, W, 5); ctx.fillRect(0, bottom, W, 5);
+
+    ctx.textAlign = 'center';
+    ctx.font = '500 20px "Roboto Mono", monospace';
+    for (let d = 0; d <= DISTANCE; d += 200) {
+      const x = (d - camStart) / mPerPx;
+      if (x < -60 || x > W + 60) continue;
+      ctx.fillStyle = 'rgba(255,255,255,.28)';
+      ctx.fillRect(x - 1.5, top, 3, bottom - top);
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.fillText(d === DISTANCE ? 'ゴール' : (DISTANCE - d) + 'm', x, top + 26);
+    }
+    const gx = (DISTANCE - camStart) / mPerPx;
+    if (gx > -20 && gx < W + 20) {
+      ctx.fillStyle = '#e8402c';
+      ctx.fillRect(gx - 3, top - 5, 6, bottom - top + 10);
+    }
+
+    HORSES.forEach(function (h, i) {
+      const x = (positions[i] - camStart) / mPerPx;
+      const y = top + laneH * (i + 0.5);
+      const r = Math.min(16, laneH / 2 - 2);
+      if (h.is_player) {
+        ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffd45e'; ctx.lineWidth = 3.5; ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = h.color.bg; ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.fillStyle = h.color.fg;
-      ctx.font = '700 ' + Math.round(R * 1.15) + 'px "Roboto Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.font = '700 ' + Math.round(r * 1.15) + 'px "Roboto Mono", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(h.no), x, y + 1);
       ctx.textBaseline = 'alphabetic';
-
-      // 名前は先頭数頭と自分の馬だけ。全部出すと読めない。
       if (h.is_player || h.currentPos <= 3) {
-        ctx.font = '500 18px "Zen Kaku Gothic New", sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillStyle = 'rgba(0,0,0,.4)';
-        ctx.fillText(h.name, x + R + 9, y + 7);
-        ctx.fillStyle = h.is_player ? '#ffe08a' : '#ffffff';
-        ctx.fillText(h.name, x + R + 8, y + 6);
+        ctx.font = '500 19px "Zen Kaku Gothic New", sans-serif';
+        ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillText(h.name, x + r + 8, y + 7);
+        ctx.fillStyle = h.is_player ? '#ffe08a' : '#fff'; ctx.fillText(h.name, x + r + 7, y + 6);
       }
     });
   }
 
-  function drawMiniMap(t) {
-    const y = H - 58, left = 40, right = W - 40;
-    ctx.fillStyle = cssVar('--rule');
-    ctx.fillRect(left, y, right - left, 6);
-    ctx.fillStyle = cssVar('--rule-strong');
-    for (let d = 0; d <= DISTANCE; d += 400) {
-      const x = left + (right - left) * (d / DISTANCE);
-      ctx.fillRect(x - 1, y - 5, 2, 16);
+  // ====================================================
+  // 実況
+  // ====================================================
+  function commentary(t, ranked, lead) {
+    const prog = lead / DISTANCE;
+    const top = ranked[0].h, second = ranked[1] ? ranked[1].h : null;
+    const mine = ranked.filter(function (r) { return r.h.is_player; })[0];
+    const minePos = mine ? mine.h.currentPos : null;
+    const remain = Math.round(DISTANCE - lead);
+
+    if (t <= 0) return 'ゲートが開くのを待っています。';
+    if (prog < 0.12) return 'スタートしました。' + top.name + 'が先手を取りました。';
+    if (prog < 0.45) {
+      let s = top.name + 'が先頭、' + (second ? second.name + 'が続きます。' : '');
+      s += PACE_LABEL + 'の流れ。';
+      if (minePos) s += 'マイホースは' + minePos + '番手。';
+      return s;
     }
-    HORSES.forEach(function (h) {
-      const x = left + (right - left) * (distanceAt(h, t) / DISTANCE);
-      ctx.beginPath();
-      ctx.arc(x, y + 3, h.is_player ? 6 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = h.is_player ? '#e0902b' : cssVar('--turf');
-      ctx.fill();
-    });
+    if (prog < 0.72) {
+      return '残り' + remain + 'm、' + top.name + 'が先頭のまま3コーナーを回ります。'
+        + (minePos ? 'マイホースは' + minePos + '番手から進出の構え。' : '');
+    }
+    if (prog < 0.93) {
+      return '直線に入りました。' + top.name + 'が抜け出しにかかる。'
+        + (second ? second.name + 'が食い下がります。' : '');
+    }
+    if (t < MAX_TIME) return 'ゴール前、' + top.name + 'が先頭。' + (second ? second.name + 'との差はわずか。' : '');
+    const winner = DATA.horses[0];
+    return winner.name + 'が優勝しました。勝ちタイム ' + mmss(winner.time) + '。';
   }
 
-  function drawHud(remain) {
-    const y = TRACK_BOTTOM - 18;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.75)';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'left';
-    ctx.font = '500 22px "Roboto Mono", monospace';
-    ctx.fillText(PACE_LABEL, 26, y);
-    ctx.textAlign = 'right';
-    ctx.font = '700 30px "Roboto Mono", monospace';
-    ctx.fillText(remain <= 0 ? 'ゴール' : '残り ' + Math.round(remain) + 'm', W - 26, y);
-    ctx.restore();
-  }
+  // ====================================================
+  // 全体の描画
+  // ====================================================
+  let camMode = 'chase';
 
   function render(t) {
     const positions = HORSES.map(function (h) { return distanceAt(h, t); });
     const lead = Math.max.apply(null, positions);
-    const tail = Math.min.apply(null, positions);
 
-    // 隊列がちょうど収まる倍率。開いても縮んでも見失わないように幅を決める。
-    const spread = Math.max(45, (lead - tail) * 1.5);
-    const mPerPx = spread / (W * 0.62);
-    const camStart = lead - W * 0.72 * mPerPx;
-
-    // 現在の順位（描画で名前を出すかの判定に使う）
     const ranked = HORSES.map(function (h, i) { return { h: h, d: positions[i] }; })
       .sort(function (a, b) { return b.d - a.d; });
     ranked.forEach(function (r, i) { r.h.currentPos = i + 1; });
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = cssVar('--surface');
-    ctx.fillRect(0, 0, W, H);
-    drawTrack(camStart, mPerPx);
-    drawHorses(camStart, mPerPx, t);
-    drawMiniMap(t);
+    if (camMode === 'chase') drawChase(t, positions, ranked);
+    else drawWide(t, positions, ranked);
 
     const remain = Math.max(0, DISTANCE - lead);
-    drawHud(remain);
-
-    updateBoard(ranked, t);
+    document.getElementById('remain-n').textContent = Math.round(remain).toLocaleString();
+    document.getElementById('clock-big').textContent = t.toFixed(1);
+    document.getElementById('call').textContent = commentary(t, ranked, lead);
+    updateLive(ranked, t);
     document.getElementById('clock').textContent = t.toFixed(1) + 's';
   }
 
-  // ---- 隊列の表示 ----
-  const orderEl = document.getElementById('order');
-  function updateBoard(ranked, t) {
+  const liveEl = document.getElementById('live');
+  function updateLive(ranked, t) {
     const leadD = ranked[0].d;
-    orderEl.innerHTML = ranked.map(function (r, i) {
+    const shown = ranked.slice(0, 5);
+    const mine = ranked.filter(function (r) { return r.h.is_player; })[0];
+    if (mine && shown.indexOf(mine) === -1) shown.push(mine);
+
+    liveEl.innerHTML = shown.map(function (r) {
       const h = r.h;
       const behind = leadD - r.d;
       const gap = t >= MAX_TIME
         ? (h.margin === 0 ? '—' : '+' + h.margin.toFixed(1))
-        : (behind < 0.5 ? '先頭' : '-' + behind.toFixed(1) + 'm');
+        : (behind < 0.4 ? '先頭' : '-' + behind.toFixed(1) + 'm');
       return '<li class="' + (h.is_player ? 'mine' : '') + '">'
-        + '<span class="pos">' + (i + 1) + '</span>'
-        + '<span class="silk" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>'
-        + '<span class="hname">' + h.name + '</span>'
-        + '<span class="gap-m">' + gap + '</span></li>';
+        + '<span class="rank">' + h.currentPos + '</span>'
+        + '<span class="chip" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>'
+        + '<span class="nm">' + h.name + '</span>'
+        + '<span class="gp">' + gap + '</span></li>';
     }).join('');
   }
 
-  // ---- 出走表 ----
-  document.getElementById('card').innerHTML = HORSES.map(function (h) {
-    return '<li class="' + (h.is_player ? 'mine' : '') + '">'
-      + '<span class="pos">' + (h.waku + 1) + '枠</span>'
-      + '<span class="silk" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>'
-      + '<span class="hname">' + h.name + '</span>'
-      + '<span class="gap-m">' + h.style + '</span></li>';
-  }).join('');
+  // ====================================================
+  // 見出し・出走表・結果
+  // ====================================================
+  function mmss(sec) {
+    const total = Math.round(sec * 10) / 10;
+    const m = Math.floor(total / 60), s = total - m * 60;
+    return m > 0 ? m + ':' + (s < 10 ? '0' : '') + s.toFixed(1) : s.toFixed(1);
+  }
+  function chip(h) {
+    return '<span class="chip" style="background:' + h.color.bg + ';color:' + h.color.fg + '">' + h.no + '</span>';
+  }
 
-  // ---- 見出し ----
   document.getElementById('title').textContent = RACE.name || 'レース';
   document.getElementById('meta').innerHTML =
     '<span><b>' + RACE.course + '</b> ' + RACE.surface + RACE.distance + 'm</span>'
     + '<span>馬場 <b>' + (RACE.cond || '良') + '</b></span>'
     + '<span><b>' + (RACE['class'] || '') + '</b></span>'
     + '<span><b>' + N + '</b>頭</span>';
-  document.getElementById('footer').textContent =
-    'seed=' + DATA.seed + ' ／ 馬名はすべて架空です';
+  document.getElementById('pace-chip').textContent = PACE_LABEL;
+  document.getElementById('footer').textContent = 'seed=' + DATA.seed + ' ／ 馬名はすべて架空です';
 
-  // ---- 結果 ----
-  const resultBody = document.getElementById('result-body');
-  resultBody.innerHTML = DATA.horses.map(function (h) {
+  document.getElementById('card-body').innerHTML = HORSES.map(function (h) {
+    return '<tr class="' + (h.is_player ? 'mine' : '') + '"><td>' + (h.waku + 1) + '</td>'
+      + '<td>' + chip(h) + '</td><td>' + h.name + '</td><td>' + h.style + '</td>'
+      + '<td>' + h.coat.name + '</td></tr>';
+  }).join('');
+
+  document.getElementById('result-body').innerHTML = DATA.horses.map(function (h) {
+    const src = HORSES.filter(function (x) { return x.no === h.no; })[0];
     const cls = (h.finish === 1 ? 'win' : '') + (h.is_player ? ' mine' : '');
-    return '<tr class="' + cls + '"><td>' + h.finish + '</td><td class="num">' + h.no + '</td>'
+    return '<tr class="' + cls + '"><td>' + h.finish + '</td><td>' + chip(src) + '</td>'
       + '<td>' + h.name + '</td><td class="num">' + mmss(h.time) + '</td>'
       + '<td class="num">' + (h.finish === 1 ? '—' : '+' + h.margin.toFixed(1)) + '</td>'
       + '<td class="num">' + h.last3f.toFixed(1) + '</td>'
       + '<td class="num">' + h.passing.join('-') + '</td><td>' + h.style + '</td></tr>';
   }).join('');
 
-  function mmss(sec) {
-    const total = Math.round(sec * 10) / 10;
-    const m = Math.floor(total / 60);
-    const s = total - m * 60;
-    return m > 0 ? m + ':' + (s < 10 ? '0' : '') + s.toFixed(1) : s.toFixed(1);
-  }
-
   const revealBtn = document.getElementById('reveal');
   const resultWrap = document.getElementById('result-wrap');
-  function reveal() {
-    resultWrap.hidden = false;
-    revealBtn.hidden = true;
-  }
+  function reveal() { resultWrap.hidden = false; revealBtn.hidden = true; }
   revealBtn.addEventListener('click', reveal);
 
-  // ---- 再生 ----
+  // ====================================================
+  // 再生
+  // ====================================================
   let t = 0, playing = false, speed = 1, last = 0;
   const playBtn = document.getElementById('play');
   const scrub = document.getElementById('scrub');
@@ -505,18 +799,14 @@
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     t += dt * speed;
-    if (t >= MAX_TIME) {
-      t = MAX_TIME;
-      setPlaying(false);
-      reveal();
-    }
+    if (t >= MAX_TIME) { t = MAX_TIME; setPlaying(false); reveal(); }
     scrub.value = String(Math.round(t / MAX_TIME * 1000));
     render(t);
     if (playing) requestAnimationFrame(step);
   }
 
   playBtn.addEventListener('click', function () {
-    if (t >= MAX_TIME) { t = 0; }
+    if (t >= MAX_TIME) t = 0;
     setPlaying(!playing);
   });
   document.getElementById('restart').addEventListener('click', function () {
@@ -527,14 +817,18 @@
     t = Number(scrub.value) / 1000 * MAX_TIME;
     render(t);
   });
-  document.querySelectorAll('.speeds button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      speed = Number(b.dataset.speed);
-      document.querySelectorAll('.speeds button').forEach(function (o) {
-        o.setAttribute('aria-pressed', String(o === b));
+  function bindGroup(selector, apply) {
+    const buttons = document.querySelectorAll(selector);
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        apply(b);
+        buttons.forEach(function (o) { o.setAttribute('aria-pressed', String(o === b)); });
+        render(t);
       });
     });
-  });
+  }
+  bindGroup('.group.cams button', function (b) { camMode = b.dataset.cam; });
+  bindGroup('.group:not(.cams) button', function (b) { speed = Number(b.dataset.speed); });
 
   render(0);
 })();
