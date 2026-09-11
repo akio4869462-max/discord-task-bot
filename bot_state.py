@@ -48,9 +48,8 @@ NEWS_CHANNEL_ID = getenv_int('NEWS_CHANNEL_ID', 1498093810356453508)
 TASK_CHANNEL_ID = getenv_int('TASK_CHANNEL_ID', NEWS_CHANNEL_ID)
 # バックアップの送り先。未設定ならタスク用チャンネルへ送る
 BACKUP_CHANNEL_ID = getenv_int('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID)
-# 週次バックアップの実行時刻。8:00の定期配信と処理が重ならないよう10分ずらす
+# バックアップの実行時刻（毎日）。8:00の定期配信と処理が重ならないよう10分ずらす
 BACKUP_TIME = time(8, 10, tzinfo=JST)
-BACKUP_WEEKDAY = 0  # 0=月曜
 FOCUS_TIMER_SECONDS = 1500
 
 # タスク完了時に獲得できる疑似作業時間（15分 = 150 EXP）

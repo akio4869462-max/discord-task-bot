@@ -9,6 +9,7 @@ data/ 配下の学習記録・タスク・演習成績などを1つのZIPにま�
    （data/service_account.json）が設計上バックアップへ混入しません。
 """
 
+import json
 import os
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -34,8 +35,8 @@ BACKUP_TARGETS = (
 # 許可リストに万一混ざっても弾く二重の防波堤
 DENYLIST = ('service_account.json',)
 
-# ホスト上に残すZIPの世代数
-KEEP_ARCHIVES = 8
+# ホスト上に残すZIPの世代数。⭕ 日次にしたので、1週間ぶん＋復元前の退避が残る程度にする
+KEEP_ARCHIVES = 10
 
 # Discordの添付上限に対する安全マージン（無料枠は10MB前後のため8MBで警告）
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
@@ -60,8 +61,11 @@ def collect_targets():
     return found, missing
 
 
-def create_archive(now=None):
-    """対象ファイルを1つのZIPにまとめ、(パス, 収録した名前, 未収録の名前) を返します。"""
+def create_archive(now=None, label=None):
+    """対象ファイルを1つのZIPにまとめ、(パス, 収録した名前, 未収録の名前) を返します。
+
+    label を渡すとファイル名に足す（復元前の退避など、日次のZIPと別に残したいとき）。
+    """
     now = now or datetime.now(JST)
     found, missing = collect_targets()
 
@@ -69,7 +73,8 @@ def create_archive(now=None):
         return None, [], missing
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    zip_path = os.path.join(BACKUP_DIR, f"backup_{now.strftime('%Y-%m-%d')}.zip")
+    suffix = f"_{label}" if label else ''
+    zip_path = os.path.join(BACKUP_DIR, f"backup_{now.strftime('%Y-%m-%d')}{suffix}.zip")
 
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in found:
@@ -115,14 +120,14 @@ def build_message(zip_path, included, missing, now=None):
 
     if zip_path is None:
         return (
-            f"⚠️ **【週次バックアップ】{date_text}**\n"
+            f"⚠️ **【バックアップ】{date_text}**\n"
             "バックアップ対象のファイルが1つも見つかりませんでした。"
             "data/ のマウント設定を確認してください。"
         )
 
     size_kb = os.path.getsize(zip_path) / 1024
     msg = (
-        f"🗄️ **【週次バックアップ】{date_text}**\n"
+        f"🗄️ **【バックアップ】{date_text}**\n"
         f"{len(included)}ファイル / {size_kb:,.1f} KB\n"
         f"収録: {', '.join(included)}"
     )
@@ -136,4 +141,80 @@ def build_message(zip_path, included, missing, now=None):
             "ホストの data/_backups/ に保存済みです。Google Driveへの保存を検討してください。"
         )
 
+    return msg
+
+
+# ====================================================
+# 復元
+# ====================================================
+# ⭕ バックアップはあっても、戻す手段がEC2へのSSHしか無かった。ZIPをDiscordに添付して
+#    /restore すれば戻せるようにする。書き戻すのは許可リストのファイルだけ。
+#    上書きの前に今の状態をZIPに退避するので、間違えても1つ前に戻れる。
+MAX_RESTORE_BYTES = MAX_UPLOAD_BYTES
+
+
+def inspect_archive(zip_path):
+    """復元用ZIPの中身を調べ、(復元できる名前, 無視する名前, エラー文) を返します。"""
+    if os.path.getsize(zip_path) > MAX_RESTORE_BYTES:
+        return [], [], "ZIPが大きすぎます。"
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            if archive.testzip() is not None:
+                return [], [], "ZIPが壊れています。"
+            names = archive.namelist()
+    except zipfile.BadZipFile:
+        return [], [], "ZIPとして読めません。"
+
+    accepted, ignored = [], []
+    for name in names:
+        base = os.path.basename(name)
+        # ディレクトリを含む名前・許可リスト外・秘密鍵は書き戻さない
+        if name != base or base not in BACKUP_TARGETS or base in DENYLIST:
+            ignored.append(name)
+        else:
+            accepted.append(base)
+    if not accepted:
+        return [], ignored, "復元できるファイルが入っていません。"
+    return accepted, ignored, None
+
+
+def restore_archive(zip_path, now=None):
+    """ZIPの中の許可リストのファイルを data/ へ書き戻します。
+
+    Returns:
+        (復元した名前, 退避したZIPのパス or None, エラー文 or None)
+    """
+    accepted, _, error = inspect_archive(zip_path)
+    if error:
+        return [], None, error
+
+    # 上書きの前に今の状態を退避する
+    now = now or datetime.now(JST)
+    snapshot, _, _ = create_archive(now, label=f"before-restore-{now.strftime('%H%M%S')}")
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    restored = []
+    with zipfile.ZipFile(zip_path) as archive:
+        for name in accepted:
+            data = archive.read(name)
+            try:
+                json.loads(data.decode('utf-8'))       # 壊れたJSONを置いてBotを落とさない
+            except (ValueError, UnicodeDecodeError):
+                continue
+            target = os.path.join(DATA_DIR, name)
+            tmp = target + '.restoring'
+            with open(tmp, 'wb') as f:
+                f.write(data)
+            os.replace(tmp, target)                    # 書き込み途中の状態を見せない
+            restored.append(name)
+    return restored, snapshot, None
+
+
+def build_restore_message(restored, snapshot, error):
+    if error:
+        return f"❌ 復元できませんでした: {error}"
+    msg = f"♻️ **復元しました**（{len(restored)}ファイル）\n収録: {', '.join(restored)}"
+    if snapshot:
+        msg += f"\n上書き前の状態は `{os.path.basename(snapshot)}` に退避してあります。"
+    msg += "\n各機能は次に開いたときから復元後のデータを読みます（再起動は不要）。"
     return msg

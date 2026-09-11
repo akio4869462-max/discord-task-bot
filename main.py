@@ -45,7 +45,7 @@ from ui_news import NewsTermsMenuView
 from ui_exam import ExamMenuView
 from ui_training import TrainingMenuView, DailyLogView, send_training_notification
 from ui_typing import TypingMenuView, TypingLogView, send_typing_notification
-from ui_utility import UtilityMenuView, weekly_backup_task
+from ui_utility import UtilityMenuView, daily_backup_task
 
 
 # ====================================================
@@ -211,9 +211,9 @@ async def on_ready():
     if not xml_news_delivery_task.is_running():
         xml_news_delivery_task.start()
         print("⏰ ニュース自動定期配信タスクを開始しました。")
-    if not weekly_backup_task.is_running():
-        weekly_backup_task.start()
-        print("🗄️ 週次バックアップタスクを開始しました。")
+    if not daily_backup_task.is_running():
+        daily_backup_task.start()
+        print("🗄️ 日次バックアップタスクを開始しました。")
 
 
 # ====================================================
