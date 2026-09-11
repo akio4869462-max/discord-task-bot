@@ -84,6 +84,14 @@
     font-family: "Roboto Mono", monospace; font-size: clamp(14px, 2vw, 24px);
     opacity: .9; margin-top: 4px;
   }
+  /* 上の小窓：全体図を常に出す */
+  .pip {
+    position: absolute; top: 3%; left: 50%; transform: translateX(-50%);
+    width: min(36%, 420px); aspect-ratio: 560 / 200;
+    border: 1px solid rgba(255,255,255,.55); box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    background: #2b4a36;
+  }
+  .pip canvas { display: block; width: 100%; height: 100%; }
   .pace-chip {
     position: absolute; top: 3.5%; right: 2.4%;
     font-family: "Roboto Mono", monospace; font-size: clamp(10px, 1.3vw, 14px);
@@ -201,6 +209,7 @@
         <div class="clock-big" id="clock-big">0.0</div>
       </div>
       <div class="pace-chip" id="pace-chip"></div>
+      <div class="pip"><canvas id="pip" width="560" height="200"></canvas></div>
       <ol class="live" id="live"></ol>
       <div class="finish" id="finish" hidden>
         <div class="finish-head">確定</div>
@@ -1228,40 +1237,44 @@
   // ====================================================
   // 全体カメラ（着差を読むための平面図）
   // ====================================================
-  function drawWide(t, positions, ranked) {
-    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
-    ctx.fillRect(0, 0, W, H);
+  /** 真上から見た図。target を省けばメインの画面に、渡せば小窓に描く。 */
+  function drawWide(t, positions, ranked, target) {
+    const c = target ? target.ctx : ctx;
+    const w = target ? target.w : W, hgt = target ? target.h : H;
+    const sc = target ? target.scale : 1;       // 小窓では文字と点を縮める
+    c.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    c.fillRect(0, 0, w, hgt);
 
     const lead = Math.max.apply(null, positions);
     const tailD = Math.min.apply(null, positions);
     const spread = Math.max(40, (lead - tailD) * 1.4);
-    const mPerPx = spread / (W * 0.6);
-    const camStart = lead - W * 0.74 * mPerPx;
-    const top = H * 0.10, bottom = H * 0.86;
+    const mPerPx = spread / (w * 0.6);
+    const camStart = lead - w * 0.74 * mPerPx;
+    const top = target ? hgt * 0.16 : hgt * 0.10, bottom = target ? hgt * 0.94 : hgt * 0.86;
     const laneH = (bottom - top) / N;
 
-    ctx.fillStyle = IS_DIRT ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.06)';
+    c.fillStyle = IS_DIRT ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.06)';
     const stripe = 25 / mPerPx;
-    for (let x = -((camStart / 25 % 1) * stripe); x < W; x += stripe * 2) {
-      ctx.fillRect(x, top, stripe, bottom - top);
+    for (let x = -((camStart / 25 % 1) * stripe); x < w; x += stripe * 2) {
+      c.fillRect(x, top, stripe, bottom - top);
     }
-    ctx.fillStyle = 'rgba(245,248,243,.9)';
-    ctx.fillRect(0, top - 5, W, 5); ctx.fillRect(0, bottom, W, 5);
+    c.fillStyle = 'rgba(245,248,243,.9)';
+    c.fillRect(0, top - 5 * sc, w, 5 * sc); c.fillRect(0, bottom, w, 5 * sc);
 
-    ctx.textAlign = 'center';
-    ctx.font = '500 20px "Roboto Mono", monospace';
+    c.textAlign = 'center';
+    c.font = '500 ' + Math.round(20 * sc) + 'px "Roboto Mono", monospace';
     for (let d = 0; d <= DISTANCE; d += 200) {
       const x = (d - camStart) / mPerPx;
-      if (x < -60 || x > W + 60) continue;
-      ctx.fillStyle = 'rgba(255,255,255,.28)';
-      ctx.fillRect(x - 1.5, top, 3, bottom - top);
-      ctx.fillStyle = 'rgba(255,255,255,.85)';
-      ctx.fillText(d === DISTANCE ? 'ゴール' : (DISTANCE - d) + 'm', x, top + 26);
+      if (x < -60 || x > w + 60) continue;
+      c.fillStyle = 'rgba(255,255,255,.28)';
+      c.fillRect(x - 1.5 * sc, top, 3 * sc, bottom - top);
+      c.fillStyle = 'rgba(255,255,255,.85)';
+      c.fillText(d === DISTANCE ? 'ゴール' : (DISTANCE - d) + 'm', x, top + 26 * sc);
     }
     const gx = (DISTANCE - camStart) / mPerPx;
-    if (gx > -20 && gx < W + 20) {
-      ctx.fillStyle = '#e8402c';
-      ctx.fillRect(gx - 3, top - 5, 6, bottom - top + 10);
+    if (gx > -20 && gx < w + 20) {
+      c.fillStyle = '#e8402c';
+      c.fillRect(gx - 3 * sc, top - 5 * sc, 6 * sc, bottom - top + 10 * sc);
     }
 
     // ⭕ 上から見た図。縦は実際の横位置（下が内ラチ）なので、馬群の形がそのまま出る
@@ -1270,27 +1283,38 @@
     drawOrder.forEach(function (i) {
       const h = HORSES[i];
       const x = (positions[i] - camStart) / mPerPx;
-      const y = bottom - 14 - (bottom - top - 28) * laneFAt(i, t);
-      const r = Math.min(16, laneH / 2 - 2);
+      const y = bottom - 14 * sc - (bottom - top - 28 * sc) * laneFAt(i, t);
+      const r = target ? 7 : Math.min(16, laneH / 2 - 2);      // 小窓は頭数に関わらず一定
       if (h.is_player) {
-        ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffd45e'; ctx.lineWidth = 3.5; ctx.stroke();
+        c.beginPath(); c.arc(x, y, r + 5 * sc, 0, Math.PI * 2);
+        c.strokeStyle = '#ffd45e'; c.lineWidth = 3.5 * sc; c.stroke();
       }
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = h.color.bg; ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.fillStyle = h.color.fg;
-      ctx.font = '700 ' + Math.round(r * 1.15) + 'px "Roboto Mono", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(h.no), x, y + 1);
-      ctx.textBaseline = 'alphabetic';
-      if (h.is_player || h.currentPos <= 3) {
-        ctx.textAlign = 'left';
-        ctx.font = '500 19px "Zen Kaku Gothic New", sans-serif';
-        ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillText(h.name, x + r + 8, y + 7);
-        ctx.fillStyle = h.is_player ? '#ffe08a' : '#fff'; ctx.fillText(h.name, x + r + 7, y + 6);
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2);
+      c.fillStyle = h.color.bg; c.fill();
+      c.strokeStyle = 'rgba(0,0,0,.5)'; c.lineWidth = 1.5 * sc; c.stroke();
+      c.fillStyle = h.color.fg;
+      c.font = '700 ' + Math.max(8, Math.round(r * 1.15)) + 'px "Roboto Mono", monospace';
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(String(h.no), x, y + 1);
+      c.textBaseline = 'alphabetic';
+      if (!target && (h.is_player || h.currentPos <= 3)) {    // 小窓では名前を出さない
+        c.textAlign = 'left';
+        c.font = '500 19px "Zen Kaku Gothic New", sans-serif';
+        c.fillStyle = 'rgba(0,0,0,.45)'; c.fillText(h.name, x + r + 8, y + 7);
+        c.fillStyle = h.is_player ? '#ffe08a' : '#fff'; c.fillText(h.name, x + r + 7, y + 6);
       }
     });
+  }
+
+  // ⭕ 全体図は常に上の小窓に出す。着差を読むのはこちら、走路の側は見て楽しむ側。
+  const pipCanvas = document.getElementById('pip');
+  const pipCtx = pipCanvas.getContext('2d');
+  const PIP = { ctx: pipCtx, w: pipCanvas.width, h: pipCanvas.height, scale: pipCanvas.width / W };
+  function drawPip(t, positions, ranked, mainMode) {
+    pipCanvas.parentElement.hidden = mainMode === 'wide';   // メインが全体なら要らない
+    if (mainMode === 'wide') return;
+    pipCtx.clearRect(0, 0, PIP.w, PIP.h);
+    drawWide(t, positions, ranked, PIP);
   }
 
   // ====================================================
@@ -1436,6 +1460,7 @@
     else if (mode === 'follow') drawFollow(t, positions, ranked);
     else if (mode === 'side') drawSide(t, positions, ranked);
     else drawWide(t, positions, ranked);
+    drawPip(t, positions, ranked, mode);
 
     const remain = Math.max(0, DISTANCE - lead);
     document.getElementById('remain-n').textContent = Math.round(remain).toLocaleString();
