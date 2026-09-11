@@ -146,7 +146,7 @@
   .group { display: flex; }
   .group button { border-radius: 0; margin-left: -1px; min-width: 52px; }
   .group button[aria-pressed="true"] { background: var(--turf-soft); border-color: var(--turf); color: var(--turf); font-weight: 700; }
-  .group.cams button { min-width: 62px; }
+  .group.cams button { min-width: 50px; }
   input[type=range] { flex: 1 1 200px; min-width: 120px; accent-color: var(--turf); }
   .clock { font-family: "Roboto Mono", monospace; font-size: 13px; color: var(--ink-2); min-width: 58px; }
   .spacer { flex: 1 1 auto; }
@@ -216,7 +216,10 @@
     <span class="clock" id="clock">0.0s</span>
     <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="再生位置">
     <span class="group cams" role="group" aria-label="カメラ">
-      <button data-cam="chase" aria-pressed="true">追走</button>
+      <button data-cam="auto" aria-pressed="true">中継</button>
+      <button data-cam="chase">追走</button>
+      <button data-cam="follow">自分</button>
+      <button data-cam="side">横</button>
       <button data-cam="wide">全体</button>
     </span>
     <span class="group" role="group" aria-label="再生速度">
@@ -984,6 +987,233 @@
   }
 
   // ====================================================
+  // 自分の馬の真後ろから見るカメラ
+  // ====================================================
+  // ⭕ 最後方から見ると先頭が豆粒になる。育成ゲームとして見たいのは自分の馬の前後なので、
+  //    道中は自分の馬の少し後ろに置き、前の馬との差を見せる。自分の馬がいなければ先頭集団。
+  function drawFollow(t, positions, ranked) {
+    const mine = HORSES.filter(function (h) { return h.is_player; })[0];
+    const focusD = mine ? positions[HORSES.indexOf(mine)] : ranked[Math.min(2, ranked.length - 1)].d;
+    const camD = focusD - 11;
+    buildBend(camD);
+    drawSky(camD);
+    drawGround(camD);
+    const drawable = HORSES.map(function (h, i) {
+      return { h: h, d: positions[i], lat: latAt(i, t) };
+    }).sort(function (a, b) { return b.d - a.d; });
+    drawable.forEach(function (o) {
+      const p = project(o.d, o.lat, camD);
+      // ⭕ 自分の馬より後ろでカメラの直前にいる馬は巨大に映るので描かない（カメラの脇を抜ける）
+      if (!p || p.depth < 7 || p.x < -260 || p.x > W + 260) return;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y + 0.1 * p.k, 0.95 * p.k, 0.28 * p.k, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,.28)';
+      ctx.fill();
+      drawHorseRear(p, o.h, (o.d / STRIDE_M) * Math.PI * 2, o.lat - CAM_LAT + bendAt(p.depth));
+      drawTag(p, o.h, o.h.is_player || o.h.currentPos === 1);
+    });
+    drawCourseMap(Math.max.apply(null, positions), mine ? focusD : null);
+  }
+
+  // ====================================================
+  // 横カメラ（スタンド側から、最後の直線を横に流す）
+  // ====================================================
+  // ⭕ 中継の定番の絵。走路に直交して見るので投影が違う：奥行きは横位置、画面の横は
+  //    走路上の距離。外ラチ側（スタンド）に置くので、外の馬ほど手前で大きい。
+  //    左回りなら馬は左から右へ、右回りなら右から左へ走る（スタンドから見た向き）。
+  const SIDE_FOCAL = 1900;                     // 望遠。先頭から30mほどを画面に収める
+  const SIDE_CAM_H = 7.5;                      // スタンドの高さ[m]
+  const SIDE_CAM_OUT = 34;                     // 外ラチからカメラまで[m]
+  const SIDE_HORIZON = H * 0.40;
+  const SIDE_DIR = -INNER;                     // 画面上で馬が進む向き（+1なら右へ）
+  const SIDE_CAM_LAT = -INNER * (TRACK_W / 2 + SIDE_CAM_OUT);
+
+  function projectSide(d, lat, camX) {
+    const depth = Math.abs(lat - SIDE_CAM_LAT);
+    const k = SIDE_FOCAL / depth;
+    return { x: W / 2 + SIDE_DIR * (d - camX) * k, y: SIDE_HORIZON + SIDE_CAM_H * k, k: k, depth: depth };
+  }
+
+  function sideCamX(positions) {
+    // 先頭を進行方向側の1/3に置き、後ろ30mほどを画面に収める（後方は画面外。中継と同じ）
+    const lead = Math.max.apply(null, positions);
+    return lead - 17;
+  }
+
+  function drawSideScene(camX) {
+    // 空と遠景
+    const sky = ctx.createLinearGradient(0, 0, 0, SIDE_HORIZON + 20);
+    sky.addColorStop(0, '#7f9fb8'); sky.addColorStop(1, '#cddae0');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, SIDE_HORIZON + 20);
+    ctx.fillStyle = '#4d6b52';
+    for (let i = 0; i < 60; i++) {
+      const x = ((i * 151 - camX * 0.6) % (W + 300) + (W + 300)) % (W + 300) - 150;
+      const hgt = 22 + (i * 13) % 24;
+      ctx.beginPath(); ctx.ellipse(x, SIDE_HORIZON - hgt * 0.3, 34, hgt * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // 内馬場（地平線から内ラチまで）
+    const inner = projectSide(0, INNER * TRACK_W / 2, camX);
+    const outer = projectSide(0, -INNER * TRACK_W / 2, camX);
+    ctx.fillStyle = '#5b9457';
+    ctx.fillRect(0, SIDE_HORIZON, W, inner.y - SIDE_HORIZON);
+    // 走路
+    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    ctx.fillRect(0, inner.y, W, outer.y - inner.y);
+    // 芝目（縦縞が横に流れる）
+    ctx.fillStyle = IS_DIRT ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.05)';
+    for (let d = Math.floor((camX - 120) / 25) * 25; d < camX + 120; d += 50) {
+      const a = projectSide(d, INNER * TRACK_W / 2, camX), b = projectSide(d + 25, INNER * TRACK_W / 2, camX);
+      const c = projectSide(d + 25, -INNER * TRACK_W / 2, camX), e = projectSide(d, -INNER * TRACK_W / 2, camX);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.closePath(); ctx.fill();
+    }
+    // 手前の芝生（外ラチからスタンドまで）
+    ctx.fillStyle = '#5b9457';
+    ctx.fillRect(0, outer.y, W, H - outer.y);
+    // 生垣（内ラチの向こう）
+    const hedge = projectSide(0, INNER * (TRACK_W / 2 + 2.2), camX);
+    ctx.fillStyle = '#2f6a3c';
+    ctx.fillRect(0, hedge.y - 0.9 * hedge.k, W, 0.9 * hedge.k);
+    // ラチ（奥＝内、手前＝外）と支柱
+    [INNER * TRACK_W / 2, -INNER * TRACK_W / 2].forEach(function (lat) {
+      const p = projectSide(0, lat, camX);
+      ctx.strokeStyle = 'rgba(245,248,243,.95)'; ctx.lineWidth = Math.max(1.5, 0.05 * p.k);
+      ctx.beginPath(); ctx.moveTo(0, p.y - 1.15 * p.k); ctx.lineTo(W, p.y - 1.15 * p.k); ctx.stroke();
+      ctx.strokeStyle = 'rgba(245,248,243,.65)'; ctx.lineWidth = Math.max(1, 0.035 * p.k);
+      ctx.beginPath(); ctx.moveTo(0, p.y - 0.6 * p.k); ctx.lineTo(W, p.y - 0.6 * p.k); ctx.stroke();
+      ctx.fillStyle = 'rgba(245,248,243,.85)';
+      for (let d = Math.floor((camX - 120) / 12) * 12; d < camX + 120; d += 12) {
+        const q = projectSide(d, lat, camX);
+        ctx.fillRect(q.x - 0.06 * q.k, q.y - 1.2 * q.k, 0.12 * q.k, 1.2 * q.k);
+      }
+    });
+    // ハロン棒とゴール板（外ラチの外）
+    const postLat = -INNER * (TRACK_W / 2 + 1.4);
+    ctx.textAlign = 'center';
+    for (let d = 0; d <= DISTANCE; d += 200) {
+      const q = projectSide(d, postLat, camX);
+      if (q.x < -40 || q.x > W + 40) continue;
+      const hgt = 2.6 * q.k;
+      ctx.fillStyle = '#f2f4f0'; ctx.fillRect(q.x - 0.12 * q.k, q.y - hgt, 0.24 * q.k, hgt);
+      ctx.fillStyle = '#e8402c'; ctx.fillRect(q.x - 0.12 * q.k, q.y - hgt, 0.24 * q.k, hgt * 0.22);
+      ctx.fillStyle = 'rgba(255,255,255,.9)';
+      ctx.font = '700 ' + Math.round(0.28 * q.k) + 'px "Roboto Mono", monospace';
+      ctx.fillText(String(DISTANCE - d), q.x, q.y - hgt - 6);
+    }
+    const g = projectSide(DISTANCE, postLat, camX);
+    if (g.x > -60 && g.x < W + 60) {
+      ctx.fillStyle = '#e8402c'; ctx.fillRect(g.x - 0.2 * g.k, g.y - 4.2 * g.k, 0.4 * g.k, 4.2 * g.k);
+      ctx.fillStyle = '#fff'; ctx.fillRect(g.x - 1.1 * g.k, g.y - 4.6 * g.k, 2.2 * g.k, 0.7 * g.k);
+      ctx.fillStyle = '#e8402c';
+      ctx.font = '700 ' + Math.round(0.45 * g.k) + 'px "Roboto Mono", monospace';
+      ctx.fillText('GOAL', g.x, g.y - 4.05 * g.k);
+      // ゴール線
+      const gi = projectSide(DISTANCE, INNER * TRACK_W / 2, camX), go = projectSide(DISTANCE, -INNER * TRACK_W / 2, camX);
+      ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = Math.max(2, 0.12 * go.k);
+      ctx.beginPath(); ctx.moveTo(gi.x, gi.y); ctx.lineTo(go.x, go.y); ctx.stroke();
+    }
+  }
+
+  /** 横から見た馬。dir は進行方向（+1で右）。 */
+  function drawHorseSide(p, h, phase, dir) {
+    const k = p.k, S = k / 30, coat = h.coat;
+    const bob = (0.5 - 0.5 * Math.cos(phase)) * 1.4 * S;
+    const x = p.x, y = p.y + bob;
+    const f = function (dx) { return x + dir * dx * S; };   // 進行方向を基準にした横座標
+    ctx.lineCap = 'round';
+    const gallop = Math.sin(phase);
+
+    // 奥側の脚（薄く）
+    ctx.strokeStyle = coat.dark; ctx.lineWidth = 3.0 * S;
+    legSide(f, y, S, phase + 0.6, false);            // 奥の後脚
+    legSide(f, y, S, phase + Math.PI + 0.6, true);   // 奥の前脚
+    // 胴
+    ctx.fillStyle = coat.body;
+    ctx.beginPath(); ctx.ellipse(f(0), y - 19 * S, 15 * S, 8.5 * S, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = coat.dark;
+    ctx.beginPath(); ctx.ellipse(f(-9), y - 17 * S, 6.5 * S, 8 * S, 0, 0, Math.PI * 2); ctx.fill();   // トモ
+    // 首と頭（伸びるときに低く）
+    ctx.strokeStyle = coat.body; ctx.lineWidth = 7.5 * S;
+    ctx.beginPath(); ctx.moveTo(f(11), y - 24 * S); ctx.lineTo(f(21), y - 30 * S + gallop * 2 * S); ctx.stroke();
+    ctx.fillStyle = coat.body;
+    ctx.beginPath(); ctx.ellipse(f(24.5), y - 28.5 * S + gallop * 2 * S, 5.5 * S, 3.6 * S, dir * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = coat.dark;                                       // 耳・たてがみ
+    ctx.beginPath(); ctx.moveTo(f(21.5), y - 32 * S + gallop * 2 * S); ctx.lineTo(f(22.5), y - 35.5 * S + gallop * 2 * S); ctx.lineTo(f(24), y - 32 * S + gallop * 2 * S); ctx.fill();
+    ctx.strokeStyle = coat.mane; ctx.lineWidth = 2.2 * S;
+    ctx.beginPath(); ctx.moveTo(f(12), y - 27 * S); ctx.lineTo(f(19), y - 31 * S + gallop * 2 * S); ctx.stroke();
+    // 手前側の脚
+    ctx.strokeStyle = coat.mane; ctx.lineWidth = 3.4 * S;
+    legSide(f, y, S, phase, false);                  // 手前の後脚
+    legSide(f, y, S, phase + Math.PI, true);         // 手前の前脚
+    // 尾
+    ctx.strokeStyle = coat.mane; ctx.lineWidth = 3.6 * S;
+    ctx.beginPath(); ctx.moveTo(f(-14), y - 22 * S);
+    ctx.quadraticCurveTo(f(-22), y - 21 * S + gallop * 2 * S, f(-26), y - 15 * S + gallop * 3 * S); ctx.stroke();
+    // 騎手（前傾）
+    const jx = f(4), jy = y - 33 * S - bob * 0.3;
+    ctx.fillStyle = '#f1e5d2';                                       // 脚（白パンツ）
+    ctx.beginPath(); ctx.ellipse(f(1), jy + 5 * S, 4.5 * S, 3 * S, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 2.2 * S;             // 長靴
+    ctx.beginPath(); ctx.moveTo(f(2), jy + 6 * S); ctx.lineTo(f(-1), jy + 12 * S); ctx.stroke();
+    ctx.fillStyle = h.color.bg;                                      // 背中
+    ctx.beginPath(); ctx.ellipse(jx, jy, 7.5 * S, 5.2 * S, -dir * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = h.color.bg; ctx.lineWidth = 2.4 * S;           // 腕
+    ctx.beginPath(); ctx.moveTo(f(7), jy - 1 * S); ctx.lineTo(f(15), jy + 3 * S); ctx.stroke();
+    ctx.fillStyle = h.color.bg;                                      // ヘルメット
+    ctx.beginPath(); ctx.arc(f(10.5), jy - 5.5 * S, 4 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.ellipse(f(13.5), jy - 5 * S, 2.2 * S, 1 * S, 0, 0, Math.PI * 2); ctx.fill();
+    // 蹄の砂煙（ダート）
+    if (IS_DIRT && gallop > 0.5) {
+      ctx.fillStyle = 'rgba(214,190,150,' + (0.4 * (gallop - 0.5) / 0.5).toFixed(2) + ')';
+      for (let j = 0; j < 3; j++) {
+        ctx.beginPath(); ctx.ellipse(f(-12 - j * 4), y - 1 * S - j * 1.2 * S, (2.5 + j) * S, (1.4 + j * 0.6) * S, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  /** 横から見た脚1本。front なら前脚。襲歩の位相で振る。 */
+  function legSide(f, y, S, a, front) {
+    const swing = Math.sin(a);
+    const rootX = front ? 10 : -9, rootY = front ? 22 : 17;
+    const jointX = rootX + swing * 4.5, jointY = rootY - 8 - Math.max(0, -swing) * 3;
+    const hoofX = jointX + swing * 6 + (front ? 1 : -1) * Math.max(0, -swing) * 3;
+    const hoofY = Math.max(0, swing) * 7 + Math.max(0, -swing) * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(f(rootX), y - rootY * S);
+    ctx.lineTo(f(jointX), y - jointY * S);
+    ctx.lineTo(f(hoofX), y - hoofY * S);
+    ctx.stroke();
+  }
+
+  function drawSide(t, positions, ranked) {
+    const camX = sideCamX(positions);
+    drawSideScene(camX);
+    // 奥（内）から手前（外）へ描く
+    const drawable = HORSES.map(function (h, i) {
+      return { h: h, d: positions[i], lat: latAt(i, t) };
+    }).map(function (o) { o.p = projectSide(o.d, o.lat, camX); return o; })
+      .sort(function (a, b) { return b.p.depth - a.p.depth; });
+    drawable.forEach(function (o) {
+      const p = o.p;
+      if (p.x < -200 || p.x > W + 200) return;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y + 0.05 * p.k, 1.3 * p.k, 0.22 * p.k, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fill();
+      drawHorseSide(p, o.h, (o.d / STRIDE_M) * Math.PI * 2, SIDE_DIR);
+      drawTag(p, o.h, o.h.is_player || o.h.currentPos === 1);
+    });
+    // ⭕ 直線ではコース図は要らないうえ、先頭集団と重なるので出さない
+  }
+
+  /** 中継モード：場面ごとにカメラを切り替える。 */
+  function autoCamera(positions) {
+    const lead = Math.max.apply(null, positions);
+    if (lead >= DISTANCE - HOME - 30) return 'side';     // 最後の直線（手前30mから振る）
+    if (lead < 220) return 'chase';                     // スタート直後は全体を後ろから
+    return 'follow';
+  }
+
+  // ====================================================
   // 全体カメラ（着差を読むための平面図）
   // ====================================================
   function drawWide(t, positions, ranked) {
@@ -1107,7 +1337,7 @@
   // ====================================================
   // 全体の描画
   // ====================================================
-  let camMode = 'chase';
+  let camMode = 'auto';        // 中継（自動切り替え）が既定
 
   function render(t) {
     const positions = HORSES.map(function (h) { return distanceAt(h, t); });
@@ -1123,7 +1353,10 @@
     ranked.forEach(function (r, i) { r.h.currentPos = i + 1; });
 
     ctx.clearRect(0, 0, W, H);
-    if (camMode === 'chase') drawChase(t, positions, ranked);
+    const mode = camMode === 'auto' ? autoCamera(positions) : camMode;
+    if (mode === 'chase') drawChase(t, positions, ranked);
+    else if (mode === 'follow') drawFollow(t, positions, ranked);
+    else if (mode === 'side') drawSide(t, positions, ranked);
     else drawWide(t, positions, ranked);
 
     const remain = Math.max(0, DISTANCE - lead);

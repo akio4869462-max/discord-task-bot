@@ -104,4 +104,5 @@ def test_write_and_size(tmp_path, result):
     out = tmp_path / 'race.html'
     out.write_text(make_viewer.render(result), encoding='utf-8')
     # 1レースぶんで数十KB。Discordに添付してもEC2に置いても困らない大きさ。
-    assert 10_000 < out.stat().st_size < 60_000
+    # ⭕ カメラ4種と馬体の描き込みで約78KBまで育った。Discordの添付上限(25MB)とは桁が違う
+    assert 10_000 < out.stat().st_size < 120_000
