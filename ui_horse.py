@@ -119,6 +119,127 @@ class StableMenuView(View):
         await interaction.response.send_message(
             "記録し忘れたぶんを、日付を指定して足せます。", view=BackfillView(), ephemeral=True)
 
+    @discord.ui.button(label="🧬 配合", style=discord.ButtonStyle.secondary, row=2)
+    async def breed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await show_breeding(interaction)
+
+
+# ====================================================
+# 配合
+# ====================================================
+# ⭕ 15戦目から次の配合を予約し、引退した瞬間に仔が生まれる（調教を止めないため）。
+#    相手の選択はモーダルに置けないので「セレクト → 確認 → 名前のモーダル」の3段。
+#    数字の根拠は docs/RACE_DESIGN.md §8。
+async def show_breeding(interaction):
+    data = horse_logic.load_stable()
+    horse = data['current']
+
+    plan = horse.get('breeding_plan')
+    if plan:
+        p = plan['partner']
+        text = (f"🧬 **配合予約済み**\n{horse['name']} × **{p['name']}**（{p['sex']}・{p['class']}）\n"
+                f"{horse_logic.format_aptitude(p['aptitude'])} ／ 種付け料 {plan['fee']:,}万円"
+                + (f"\n仔の名前: {plan['foal_name']}" if plan.get('foal_name') else '')
+                + "\n引退した瞬間に仔が生まれます。")
+        await interaction.response.send_message(text, view=CancelBreedingView(), ephemeral=True)
+        return
+
+    ok, reason = horse_logic.breeding_status(horse)
+    if not ok:
+        await interaction.response.send_message(
+            f"🧬 配合は{horse_logic.BREEDING_OPEN_STARTS}戦目から予約できます。{reason}。",
+            ephemeral=True)
+        return
+
+    cands = horse_logic.breeding_candidates(data)
+    if not cands:
+        await interaction.response.send_message("相手がいません。", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        horse_logic.format_candidates(data) + "\n\n相手を選んでください。",
+        view=BreedSelectView(cands), ephemeral=True)
+
+
+class BreedSelectView(View):
+    def __init__(self, cands):
+        super().__init__(timeout=180)
+        self.add_item(BreedDropdown(cands))
+
+
+class BreedDropdown(Select):
+    def __init__(self, cands):
+        # ⭕ セレクトは25件まで。自家の引退馬が増えたら新しいものを残し、市場の6頭は必ず出す
+        own = [c for c in cands if c['source'] == 'own'][-19:]
+        cands = own + [c for c in cands if c['source'] == 'market']
+        self.cands = {c['key']: c for c in cands}
+        options = []
+        for c in cands:
+            fee = '無料' if c['fee'] == 0 else f"{c['fee']:,}万円"
+            origin = '自家' if c['source'] == 'own' else '市場'
+            options.append(discord.SelectOption(
+                label=f"[{origin}] {c['name']}（{c['class']}）"[:100],
+                value=c['key'],
+                description=f"{horse_logic.format_aptitude(c['aptitude'])} ／ {fee}"[:100]))
+        super().__init__(placeholder="配合の相手を選択", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        c = self.cands[self.values[0]]
+        fee = '無料' if c['fee'] == 0 else f"{c['fee']:,}万円"
+        await interaction.response.edit_message(
+            content=(f"{horse_logic.format_candidate(c)}\n\n"
+                     f"種付け料 **{fee}** で予約しますか？"),
+            view=BreedConfirmView(c))
+
+
+class BreedConfirmView(View):
+    def __init__(self, cand):
+        super().__init__(timeout=180)
+        self.cand = cand
+
+    @discord.ui.button(label="予約する", style=discord.ButtonStyle.success)
+    async def ok_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(BreedNameModal(self.cand))
+
+    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="配合はやめました。", view=None)
+
+
+class BreedNameModal(discord.ui.Modal):
+    def __init__(self, cand):
+        super().__init__(title="仔の名前")
+        self.cand = cand
+        self.name_input = discord.ui.TextInput(
+            label="仔の名前（空欄なら自動で付けます）", required=False, max_length=9,
+            placeholder="カタカナ9文字まで")
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            plan = horse_logic.reserve_breeding(self.cand['key'], foal_name=self.name_input.value)
+        except ValueError as e:
+            await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
+            return
+        data = horse_logic.load_stable()
+        p = plan['partner']
+        await interaction.response.send_message(
+            f"🧬 **{p['name']}** と配合を予約しました。種付け料 {plan['fee']:,}万円"
+            f" ／ 残り資金 {data['funds']:,}万円"
+            + (f"\n仔の名前: {plan['foal_name']}" if plan.get('foal_name') else '')
+            + "\n引退した瞬間に仔が生まれます。", ephemeral=True)
+
+
+class CancelBreedingView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="予約を取り消す（種付け料を戻す）", style=discord.ButtonStyle.danger)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        plan = horse_logic.cancel_breeding()
+        fee = plan.get('fee', 0) if plan else 0
+        await interaction.response.edit_message(
+            content=f"🚫 配合の予約を取り消し、{fee:,}万円を戻しました。", view=None)
+
 
 # ====================================================
 # あとから記録する
@@ -479,6 +600,17 @@ async def stable_command(interaction: discord.Interaction):
 @tree.command(name="entry", description="次のレースへの出走を登録します")
 async def entry_command(interaction: discord.Interaction):
     await show_race_entry(interaction)
+
+
+@tree.command(name="breed", description="次の世代の配合を予約します（15戦目から）")
+async def breed_command(interaction: discord.Interaction):
+    await show_breeding(interaction)
+
+
+@tree.command(name="pedigree", description="現役馬の血統表を表示します")
+async def pedigree_command(interaction: discord.Interaction):
+    horse = horse_logic.load_stable()['current']
+    await interaction.response.send_message(horse_logic.format_pedigree(horse), ephemeral=True)
 
 
 @tree.command(name="test_race", description="[デバッグ]登録中のレースを今すぐ実行します")
