@@ -12,15 +12,21 @@ from datetime import datetime, timedelta, timezone
 EXAM_DATA_FILE = os.path.join('data', 'exam_data.json')
 JST = timezone(timedelta(hours=9))
 
-# 【出題分野の定義】応用情報技術者試験のシラバスに沿った分類
+# 【出題分野の定義】応用情報技術者試験の3大分類
 # キーが内部保存用のID、値が表示名
+# ⭕ 当初はシラバスの中分類（基礎理論・コンピュータシステム・技術要素・開発技術・
+#    マネジメント・ストラテジ）の6つだったが、記録するたびに細かく選ぶのが手間で、
+#    弱点を見るにも3大分類で十分なので3つにした。
 EXAM_FIELDS = {
-    "basic_theory": "基礎理論（離散数学・アルゴリズム等）",
-    "computer_system": "コンピュータシステム（ハードウェア・OS等）",
-    "technology": "技術要素（DB・ネットワーク・セキュリティ等）",
-    "development": "開発技術（システム開発・ソフトウェア工学）",
-    "management": "マネジメント系（プロジェクト・サービス）",
-    "strategy": "ストラテジ系（経営戦略・システム戦略）",
+    "technology": "テクノロジ系",
+    "management": "マネジメント系",
+    "strategy": "ストラテジ系",
+}
+# 旧6分野 → 3大分類。読み込み時に読み替える（移行スクリプトは書かない）
+LEGACY_FIELDS = {
+    "basic_theory": "technology",
+    "computer_system": "technology",
+    "development": "technology",
 }
 
 # 正答率がこの値を下回る分野を「弱点」として強調表示する
@@ -40,11 +46,14 @@ def _load_json(path, default):
 
 
 def load_exam_data():
-    """演習記録データをファイルから読み込みます。"""
-    return _load_json(EXAM_DATA_FILE, {
+    """演習記録データをファイルから読み込みます。旧6分野の記録は3大分類へ読み替えます。"""
+    data = _load_json(EXAM_DATA_FILE, {
         "sessions": [],          # [{"date", "field", "total", "correct"}]
         "weekly_snapshot": {},   # 週間サマリー用の前回時点スナップショット
     })
+    for s in data.get('sessions', []):
+        s['field'] = LEGACY_FIELDS.get(s.get('field'), s.get('field'))
+    return data
 
 
 def save_exam_data(data):

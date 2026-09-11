@@ -99,10 +99,10 @@ def test_get_stats_summary_when_empty():
 
 def test_get_stats_summary_lists_weak_field_first():
     el.log_session('strategy', 10, 9)      # 90%
-    el.log_session('basic_theory', 10, 3)  # 30% → 弱点
+    el.log_session('technology', 10, 3)    # 30% → 弱点
 
     summary = el.get_stats_summary()
-    idx_weak = summary.index('基礎理論')
+    idx_weak = summary.index('テクノロジ')
     idx_strong = summary.index('ストラテジ')
 
     assert idx_weak < idx_strong  # 正答率が低い分野が先に表示される
@@ -114,6 +114,26 @@ def test_get_stats_summary_shows_untouched_fields():
     summary = el.get_stats_summary()
     assert '未着手の分野' in summary
     assert 'マネジメント系' in summary
+
+
+def test_fields_are_the_three_major_categories():
+    assert list(el.EXAM_FIELDS) == ['technology', 'management', 'strategy']
+
+
+def test_old_six_field_records_are_read_as_technology(isolated_file):
+    """⭕ 旧6分野の記録は読み込み時に3大分類へ読み替える（移行スクリプトは書かない）。"""
+    import json
+    with open(el.EXAM_DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump({"sessions": [
+            {"date": "2026-08-11", "field": "basic_theory", "total": 5, "correct": 5},
+            {"date": "2026-08-11", "field": "development", "total": 4, "correct": 1},
+            {"date": "2026-08-11", "field": "strategy", "total": 3, "correct": 1},
+        ], "weekly_snapshot": {}}, f)
+
+    stats = el.aggregate_by_field(el.load_exam_data()['sessions'])
+    assert stats['technology'] == {"total": 9, "correct": 6, "rate": 67}
+    assert stats['strategy']['total'] == 3
+    assert '基礎理論' not in el.get_stats_summary()
 
 
 # ====================================================

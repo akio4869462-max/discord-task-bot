@@ -28,7 +28,7 @@ class ExamMenuView(View):
 class ExamFieldSelectView(View):
     """演習記録の1ステップ目：分野をプルダウンで選ばせるView
 
-    分野は6つあり、ボタンだと横幅を圧迫するためセレクトメニューを採用している。
+    分野は3つ。かつて6つあった頃の名残でセレクトメニューだが、選ぶ手順は同じなので残す。
     """
     def __init__(self):
         super().__init__(timeout=60)
