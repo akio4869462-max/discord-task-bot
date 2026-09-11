@@ -56,6 +56,63 @@ TRAVEL_COST = {
     '小倉': 300, '函館': 300, '札幌': 300,
 }
 
+# ====================================================
+# 🌏 海外遠征
+# ====================================================
+# ⭕ 月に1回（その月の最初の土曜）、国内G1の上に乗る目標として出す。実在のレース名は
+#    使わず「場所＋条件」で呼ぶ。較正データは JRA のものしか無いので、基準タイムと
+#    ビューアの形状は近い国内コース（proxy）から借りる。嘘にならない範囲の近似。
+OVERSEAS_G1_WINS = 2        # 現役馬のG1勝利がこれ以上で海外の番組が出る
+OVERSEAS_RIVAL_BOOST = 60   # 海外の出走馬は国内G1より一段強い（能力+60 ≒ z+0.3）
+OVERSEAS = [
+    {'venue': '香港', 'travel': 1500, 'prize': 30000,
+     'races': [('芝', 1200, '東京'), ('芝', 1600, '東京'), ('芝', 2000, '東京')]},
+    {'venue': 'ドバイ', 'travel': 3000, 'prize': 60000,
+     'races': [('芝', 1800, '東京'), ('ダ', 2000, '東京')]},
+    {'venue': 'フランス', 'travel': 3000, 'prize': 50000,
+     'races': [('芝', 2400, '東京')]},
+    {'venue': 'アメリカ', 'travel': 3000, 'prize': 60000,
+     'races': [('ダ', 2000, '東京'), ('芝', 2400, '東京')]},
+]
+
+
+def is_overseas_day(date):
+    """その月の最初の土曜が海外遠征日。"""
+    return date.weekday() == 5 and date.day <= 7
+
+
+def overseas_destination(date):
+    return OVERSEAS[(date.year * 12 + date.month) % len(OVERSEAS)]
+
+
+def overseas_offers(date):
+    """海外遠征日の番組。G1の上に乗る1〜3本。遠征日でなければ空。"""
+    if not is_overseas_day(date):
+        return []
+    dest = overseas_destination(date)
+    rng = random.Random(_date_seed(date, f"海外:{dest['venue']}"))
+    races = []
+    for i, (surface, distance, proxy) in enumerate(dest['races']):
+        races.append({
+            'id': f"{date.isoformat()}-overseas-{i}",
+            'name': f"{dest['venue']}国際招待 {surface}{distance}m",
+            'date': date.isoformat(),
+            'course': dest['venue'],
+            'proxy_course': proxy,          # 基準タイムとビューアの形状を借りる国内コース
+            'surface': surface,
+            'distance': distance,
+            'cond': rng.choice(COND_CHOICES),
+            'class': 'G1',
+            'grade': 'G1',
+            'prize': dest['prize'],
+            'travel': dest['travel'],
+            'overseas': True,
+            'rival_boost': OVERSEAS_RIVAL_BOOST,
+            'course_config': None,
+        })
+    return races
+
+
 # 内回り・外回りがある競馬場。⭕ ビューアが描き分けられるよう race に持たせる。
 DUAL_COURSES = {'中山', '京都', '阪神', '新潟'}
 

@@ -431,7 +431,9 @@ async def show_race_entry(interaction):
 
     day, races = horse_logic.available_races(data)
     if not races:
+        resting = horse_logic.rest_reason(horse, day)
         await interaction.response.send_message(
+            f"✈️ {resting}" if resting else
             f"{day.isoformat()} に{horse['class']}クラスで出走できるレースがありませんでした。",
             ephemeral=True)
         return
@@ -452,7 +454,7 @@ class RaceDropdown(Select):
         self.races = {r['id']: r for r in races}
         options = [
             discord.SelectOption(
-                label=f"{r['name']}"[:100],
+                label=f"{'🌏 ' if r.get('overseas') else ''}{r['name']}"[:100],
                 value=r['id'],
                 description=(f"{r['course']}{r['surface']}{r['distance']}m {r['cond']}"
                              f" ／ 1着{r['prize']:,}万円{horse_logic.format_travel(r)}")[:100])

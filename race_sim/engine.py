@@ -138,6 +138,15 @@ def clear_baseline_cache():
     _baseline_cache.clear()
 
 
+def _baseline_course(race):
+    """較正データを引くコース名。
+
+    ⭕ 海外など較正データの無いコースは、近い国内コース（proxy_course）の基準を借りる。
+       表示用の course はそのまま（「香港」）、数字だけ proxy から取る。
+    """
+    return race.get('proxy_course') or race['course']
+
+
 def base_time(race, baseline=None):
     """コースと馬場から、そのレースの基準タイム[秒]を求める。
 
@@ -153,7 +162,7 @@ def base_time(race, baseline=None):
     """
     baseline = baseline or load_baseline()
     base = baseline['base']
-    key = f"{race['course']}|{race['surface']}|{race['distance']}"
+    key = f"{_baseline_course(race)}|{race['surface']}|{race['distance']}"
 
     entry = base.get(key)
     t = entry['win_time'] if entry else _interpolate_base(base, race)
@@ -165,7 +174,7 @@ def base_time(race, baseline=None):
 
 def _interpolate_base(base, race):
     """同一コースの他距離から速度を借りて基準タイムを推定する。"""
-    prefix = f"{race['course']}|{race['surface']}|"
+    prefix = f"{_baseline_course(race)}|{race['surface']}|"
     same = [(int(k.rsplit('|', 1)[1]), v['win_time']) for k, v in base.items() if k.startswith(prefix)]
     if not same:
         # 場所すら無ければ、同じ芝ダの全コースの平均速度で代用する
@@ -284,13 +293,13 @@ def base_last3f(race, baseline=None, pace=0.0, rng=None):
        コース別平均を基準として使う。
     """
     baseline = baseline or load_baseline()
-    key = f"{race['course']}|{race['surface']}|{race['distance']}"
+    key = f"{_baseline_course(race)}|{race['surface']}|{race['distance']}"
     entry = baseline['base'].get(key)
 
     if entry:
         t = entry['last3f']
     else:
-        prefix = f"{race['course']}|{race['surface']}|"
+        prefix = f"{_baseline_course(race)}|{race['surface']}|"
         same = [v['last3f'] for k, v in baseline['base'].items() if k.startswith(prefix)]
         t = sum(same) / len(same) if same else DEFAULT_LAST3F.get(race['surface'], 35.0)
 

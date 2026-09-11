@@ -308,7 +308,8 @@
     '阪神': { turn: 1, straight: 356.5, lap: 1689.0 },
     '小倉': { turn: 1, straight: 293.0, lap: 1615.1 }
   };
-  const COURSE = COURSES[RACE.course] || COURSES['東京'];
+  // 海外など形状データの無いコースは、近い国内コース（proxy_course）の形で描く
+  const COURSE = COURSES[RACE.course] || COURSES[RACE.proxy_course] || COURSES['東京'];
 
   // ⭕ 楕円は「直線2本 ＋ 半円のコーナー2つ」で近似する。1周距離と直線の長さが
   //    分かればコーナーの半径が決まる。レースは必ずゴール（ホームストレッチの終点）で

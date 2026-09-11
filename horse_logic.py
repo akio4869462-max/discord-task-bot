@@ -70,7 +70,12 @@ ACTIVITY_PARAMS = {
 TRAINING_MINUTES = 60
 TYPING_MINUTES = 60
 
-RETIRE_STARTS = 20          # 何戦で引退するか
+RETIRE_STARTS = 20          # 何戦（出走枠）で引退するか
+# ⭕ 海外遠征はその週の2開催ぶんを使う。引退は出走枠で数えるので、枠を2つ消費させないと
+#    「1走減る週」が費用にならず、むしろ調教の週が増えて得になってしまう。
+OVERSEAS_SLOTS = 2
+OVERSEAS_REST_DAYS = 5      # 海外遠征のあと、次の開催日（水曜）まで出走できない
+OVERSEAS_STUD_BONUS = 0.50  # 海外G1勝ちの種牡馬価値（国内G1勝ちは +0.30）
 # 次世代が受け継ぐ、親の積み上げの割合
 INHERIT_RATE = 0.10
 
@@ -193,6 +198,8 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
         'aptitude': _random_aptitude(rng),
         'class': '未勝利',
         'record': {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0},
+        'slots': 0,                      # 引退までの出走枠の消費（海外遠征は2）
+        'rest_until': None,
         # ⭕ 血統表は再帰ノード {'name', 'sire': node|None, 'dam': node|None} で持つ。
         #    名前の平面だとインブリードやニックスを見るときに作り直しになる。
         'pedigree': pedigree or {'sire': None, 'dam': None},
@@ -275,6 +282,8 @@ def load_stable(today=None):
         horse.setdefault('entry', None)
         horse.setdefault('history', [])
         horse.setdefault('breeding_plan', None)
+        horse.setdefault('rest_until', None)
+        horse.setdefault('slots', horse.get('record', {}).get('starts', 0))
         horse.setdefault('record', {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0})
         horse['pedigree'] = _migrate_pedigree(horse.get('pedigree'))
         for k in PARAMS:
@@ -469,7 +478,12 @@ def available_races(data=None, on=None, now=None):
         if race_calendar.is_race_day(on) and now.hour >= RACE_HOUR:
             on += timedelta(days=1)
     day = race_calendar.next_race_day(on)
-    return day, race_calendar.offers(horse['class'], day, aptitude=horse['aptitude'])
+    if rest_reason(horse, day):
+        return day, []
+    races = race_calendar.offers(horse['class'], day, aptitude=horse['aptitude'])
+    if overseas_eligible(horse):
+        races = races + race_calendar.overseas_offers(day)
+    return day, races
 
 
 def enter_race(race, style=None, data=None, save=True):
@@ -545,6 +559,7 @@ def _apply_result(data, race, mine, today, field_size):
     """着順を成績に反映し、昇級と引退を判定します。"""
     horse = data['current']
     rec = horse['record']
+    before = slots_used(horse)          # ⭕ starts を足す前に取る（古いデータは starts で補うため）
     rec['starts'] += 1
     if mine['finish'] == 1:
         rec['win'] += 1
@@ -556,29 +571,71 @@ def _apply_result(data, race, mine, today, field_size):
     rec['prize'] += prize
     data['funds'] = data.get('funds', 0) + prize     # 種付け料の原資
 
+    overseas = bool(race.get('overseas'))
     horse['history'].append({
         'date': today.isoformat(), 'race': race['name'],
         'course': race['course'], 'surface': race['surface'], 'distance': race['distance'],
         'cond': race.get('cond', '良'), 'class': race['class'],
         'finish': mine['finish'], 'field': field_size,
         'time': mine['time'], 'last3f': mine['last3f'], 'style': mine['style'],
+        'overseas': overseas,
     })
+
+    # ⭕ 引退は「出走枠」で数える。海外遠征はその週の2開催ぶんを使うので2枠。
+    #    成績（starts）は実際に走った数のまま。
+    horse['slots'] = before + (OVERSEAS_SLOTS if overseas else 1)
+    if overseas:
+        horse['rest_until'] = (today + timedelta(days=OVERSEAS_REST_DAYS)).isoformat()
 
     events = []
     if mine['finish'] == 1:
-        idx = engine.CLASS_ORDER.index(horse['class'])
-        if idx < len(engine.CLASS_ORDER) - 1:
-            horse['class'] = engine.CLASS_ORDER[idx + 1]
-            events.append(f"🏆 勝利！ {horse['class']}クラスへ昇級しました。")
+        if overseas:
+            events.append(f"🌏 海外G1制覇！ {race['course']}で勝ちました。")
         else:
-            events.append("🏆 G1制覇！")
+            idx = engine.CLASS_ORDER.index(horse['class'])
+            if idx < len(engine.CLASS_ORDER) - 1:
+                horse['class'] = engine.CLASS_ORDER[idx + 1]
+                events.append(f"🏆 勝利！ {horse['class']}クラスへ昇級しました。")
+            else:
+                events.append("🏆 G1制覇！")
+        if not overseas and g1_wins(horse) == race_calendar.OVERSEAS_G1_WINS:
+            events.append(f"🌏 G1を{g1_wins(horse)}勝。海外遠征（毎月最初の土曜）に出られるようになりました。")
 
-    if rec['starts'] == BREEDING_OPEN_STARTS:
+    if before < BREEDING_OPEN_STARTS <= slots_used(horse):
         events.append(f"🧬 {BREEDING_OPEN_STARTS}戦目。次の世代の配合を予約できるようになりました。"
-                      f"（残り{RETIRE_STARTS - rec['starts']}戦）")
-    if rec['starts'] >= RETIRE_STARTS:
+                      f"（残り{slots_left(horse)}戦）")
+    if slots_used(horse) >= RETIRE_STARTS:
         events.append(retire(data, today))
     return events
+
+
+def slots_used(horse):
+    """引退までの出走枠をいくつ使ったか。
+
+    ⭕ 枠は出走数を下回らない（海外遠征で上回ることはある）。古いデータや手で出走数を
+       いじったデータでも辻褄が合うよう、大きいほうを取る。
+    """
+    return max(horse.get('slots', 0), horse['record']['starts'])
+
+
+def slots_left(horse):
+    return max(0, RETIRE_STARTS - slots_used(horse))
+
+
+def g1_wins(horse):
+    return sum(1 for h in horse.get('history', []) if h.get('class') == 'G1' and h.get('finish') == 1)
+
+
+def overseas_eligible(horse):
+    return g1_wins(horse) >= race_calendar.OVERSEAS_G1_WINS
+
+
+def rest_reason(horse, day):
+    """海外遠征の帯同で出走できない日なら、その理由を返します。"""
+    until = horse.get('rest_until')
+    if until and day.isoformat() <= until:
+        return f"海外遠征から戻る途中です（{until} まで出走できません）。"
+    return None
 
 
 # ====================================================
@@ -594,7 +651,10 @@ def stud_value(horse):
     bonus = 1.0 + 0.05 * rec.get('win', 0)
     # ⭕ 「G1クラスで勝ち≧1」だと、G1に上がった馬は必ず7勝しているので全員が該当する。
     #    G1を勝った馬に限る。
-    if any(h.get('class') == 'G1' and h.get('finish') == 1 for h in horse.get('history', [])):
+    g1 = [h for h in horse.get('history', []) if h.get('class') == 'G1' and h.get('finish') == 1]
+    if any(h.get('overseas') for h in g1):
+        bonus += OVERSEAS_STUD_BONUS
+    elif g1:
         bonus += 0.30
     return bonus
 
@@ -758,11 +818,11 @@ def breeding_candidates(data, pool=None):
 
 def breeding_status(horse):
     """配合を予約できるか。(bool, 理由) を返します。"""
-    starts = horse['record']['starts']
+    used = slots_used(horse)
     if horse.get('breeding_plan'):
         return False, '予約済み'
-    if starts < BREEDING_OPEN_STARTS:
-        return False, f"あと{BREEDING_OPEN_STARTS - starts}戦で予約できます"
+    if used < BREEDING_OPEN_STARTS:
+        return False, f"あと{BREEDING_OPEN_STARTS - used}戦で予約できます"
     return True, ''
 
 
@@ -832,7 +892,7 @@ def format_horse(data=None, today=None):
     lines.append(f"成績: {rec['starts']}戦{rec['win']}勝"
                  f"（2着{rec['place'] - rec['win']} 3着{rec['show'] - rec['place']}）"
                  f" 獲得賞金 {rec['prize']:,}万円")
-    lines.append(f"残り{max(0, RETIRE_STARTS - rec['starts'])}戦で引退"
+    lines.append(f"残り{slots_left(horse)}戦で引退"
                  f" ／ 累計 {total_minutes(horse['growth']) / 60:.1f}時間"
                  f" ／ 厩舎資金 {data.get('funds', 0):,}万円")
 
@@ -921,7 +981,23 @@ def format_race_day_notice(data=None, today=None):
 
     ok, _ = breeding_status(horse)
     if ok:
-        state += f"\n🧬 配合を予約できます（残り{RETIRE_STARTS - horse['record']['starts']}戦）"
+        state += f"\n🧬 配合を予約できます（残り{slots_left(horse)}戦）"
+
+    resting = rest_reason(horse, today)
+    if resting:
+        return '\n'.join([header, state, f"✈️ {resting}"])
+
+    # ⭕ 海外遠征は月1回なので、当日と1週間前に知らせる。資格が無ければ条件だけ出す。
+    if race_calendar.is_overseas_day(today):
+        dest = race_calendar.overseas_destination(today)
+        if overseas_eligible(horse):
+            state += f"\n🌏 **今日は海外遠征日（{dest['venue']}）。** 出走枠を2つ使い、次の開催日は休みになります。"
+        else:
+            state += (f"\n🌏 今日は海外遠征日（{dest['venue']}）ですが、G1 {g1_wins(horse)}勝なので出られません"
+                      f"（{race_calendar.OVERSEAS_G1_WINS}勝で解放）。")
+    elif race_calendar.is_overseas_day(today + timedelta(days=7)) and overseas_eligible(horse):
+        dest = race_calendar.overseas_destination(today + timedelta(days=7))
+        state += f"\n🌏 来週の土曜は海外遠征日（{dest['venue']}）。遠征費 {dest['travel']:,}万円。"
 
     if entry:
         # ⭕ run_entry() は登録の日付を見ないので、前回走り損なった登録は今夜そのまま走る。
@@ -994,7 +1070,7 @@ def get_weekly_summary(data=None, today=None, save=True):
     if changed:
         msg += f"🎓 世代交代しました。\n"
     msg += f"🐎 {horse['name']}（{horse['class']}） 通算 {rec['starts']}戦{rec['win']}勝"
-    msg += f" ／ 残り{max(0, RETIRE_STARTS - rec['starts'])}戦\n"
+    msg += f" ／ 残り{slots_left(horse)}戦\n"
 
     prev = snap.get('last_week_minutes')
     if prev:
@@ -1022,7 +1098,8 @@ def format_races(day, races):
     lines = [f"📅 **{day.isoformat()} の出走可能レース**"]
     for i, r in enumerate(races, start=1):
         grade = f" [{r['grade']}]" if r.get('grade') else ''
-        lines.append(f"{i}. **{r['name']}**{grade} "
+        mark = '🌏 ' if r.get('overseas') else ''
+        lines.append(f"{i}. {mark}**{r['name']}**{grade} "
                      f"{r['course']}{r['surface']}{r['distance']}m {r['cond']} "
                      f"／ 1着 {r['prize']:,}万円{format_travel(r)}")
     return '\n'.join(lines)

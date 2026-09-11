@@ -220,10 +220,12 @@ def build_field(race, size=None, seed=None, player=None, pool=None):
             'pos_sd': player.get('pos_sd', INTENT_SD),
             'is_player': True,
         })
+    # ⭕ 海外遠征など「同じクラスでも一段強い面々」を組むための上積み
+    boost = race.get('rival_boost', 0)
     for h in rivals:
         members.append({
             'name': h['name'],
-            'params': dict(h['params']),
+            'params': {k: min(1000, v + boost) for k, v in h['params'].items()},
             'aptitude': dict(h['aptitude']),
             'condition': rng.choice(CONDITION_CHOICES),
             'pos_mean': h['pos_mean'],
