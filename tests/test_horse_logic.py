@@ -475,8 +475,9 @@ def test_format_result_reports_the_finish():
     text = hl.format_result(out)
 
     assert race['name'] in text
-    assert data['current']['name'] in text          # 自分の馬が着順表にいる
-    assert '★' in text                               # 自分の馬に印が付く
+    # ⭕ 着順表は馬名を表示幅で切り詰めるので、全文ではなく先頭で探す
+    #    （9文字の名前を引いたときだけ落ちる flaky があった）
+    assert '★' + data['current']['name'][:6] in text   # 自分の馬が着順表にいて印が付く
     if out['finish'] == 1:
         assert '勝ちました' in text
     else:
