@@ -1260,6 +1260,8 @@
     }
     c.fillStyle = 'rgba(245,248,243,.9)';
     c.fillRect(0, top - 5 * sc, w, 5 * sc); c.fillRect(0, bottom, w, 5 * sc);
+    c.fillStyle = '#2f6a3c';                                  // 内ラチ側に生垣を描いて内外を示す
+    if (INNER < 0) c.fillRect(0, 0, w, top - 5 * sc); else c.fillRect(0, bottom + 5 * sc, w, hgt - bottom - 5 * sc);
 
     c.textAlign = 'center';
     c.font = '500 ' + Math.round(20 * sc) + 'px "Roboto Mono", monospace';
@@ -1277,13 +1279,18 @@
       c.fillRect(gx - 3 * sc, top - 5 * sc, 6 * sc, bottom - top + 10 * sc);
     }
 
-    // ⭕ 上から見た図。縦は実際の横位置（下が内ラチ）なので、馬群の形がそのまま出る
+    // ⭕ 上から見た図。縦は実際の横位置なので、馬群の形がそのまま出る。
+    //    馬は左→右へ走るので、左回りなら馬の左側＝内ラチが上、右回りなら内ラチが下。
+    //    追走カメラで内が見える側と揃える（当初は内を常に下に置いて左右が食い違っていた）。
+    const innerAtTop = INNER < 0;
+    const span = bottom - top - 28 * sc;
+    const yOf = function (f) { return innerAtTop ? top + 14 * sc + span * f : bottom - 14 * sc - span * f; };
     const drawOrder = HORSES.map(function (h, i) { return i; })
-      .sort(function (a, b) { return laneFAt(a, t) - laneFAt(b, t); });
+      .sort(function (a, b) { return (yOf(laneFAt(a, t)) - yOf(laneFAt(b, t))); });
     drawOrder.forEach(function (i) {
       const h = HORSES[i];
       const x = (positions[i] - camStart) / mPerPx;
-      const y = bottom - 14 * sc - (bottom - top - 28 * sc) * laneFAt(i, t);
+      const y = yOf(laneFAt(i, t));
       const r = target ? 7 : Math.min(16, laneH / 2 - 2);      // 小窓は頭数に関わらず一定
       if (h.is_player) {
         c.beginPath(); c.arc(x, y, r + 5 * sc, 0, Math.PI * 2);
