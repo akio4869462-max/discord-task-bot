@@ -161,3 +161,28 @@ def test_weekly_exam_summary_only_counts_new_sessions():
 
     assert '10問' in summary  # 前回以降の分だけ
     assert '50%' in summary
+
+
+# ====================================================
+# reset_exam_data
+# ====================================================
+
+def test_reset_clears_records_and_keeps_a_backup(isolated_file):
+    """⭕ 消す前のファイルを退避してから空にする。誤操作で戻せなくなるのを防ぐ。"""
+    import glob
+    el.log_session('technology', 10, 8)
+    el.log_session('strategy', 5, 2)
+
+    msg = el.reset_exam_data()
+
+    assert '2件' in msg
+    assert el.load_exam_data()['sessions'] == []
+    backups = glob.glob(el.EXAM_DATA_FILE.replace('.json', '.*.bak.json'))
+    assert len(backups) == 1
+    assert 'まだ演習記録がありません' in el.get_stats_summary()
+
+
+def test_reset_on_empty_data_is_harmless():
+    msg = el.reset_exam_data()
+    assert '0件' in msg
+    assert el.load_exam_data()['sessions'] == []
