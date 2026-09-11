@@ -43,6 +43,17 @@ GROWTH_EXP = 0.70           # 逓減の効き。序盤ほど伸びやすい
 ABILITY_CAP = 1000          # 「G1を大きく超える怪物」の水準。最良の配合と育成で届く
 
 PARAMS = engine.JST_PARAMS
+
+# 成長型。現役のどの時期かで伸びの係数が変わる（デビュー時 → 引退時）。
+# ⭕ 現役平均ではほぼ同じになるようにして、難易度の較正（G1 7勝）を崩さない。
+#    早熟は序盤で稼いで海外へ、晩成は15戦目以降に勝負、という枠の使い方が生まれる。
+GROWTH_TYPES = ('早熟', '普通', '晩成')
+GROWTH_TYPE_WEIGHTS = (25, 50, 25)
+GROWTH_TYPE_CURVE = {'早熟': (1.12, 0.92), '普通': (1.0, 1.0), '晩成': (0.90, 1.12)}
+GROWTH_TYPE_CAP = {'早熟': 920, '普通': ABILITY_CAP, '晩成': ABILITY_CAP}
+GROWTH_TYPE_INHERIT = 0.70   # 両親が同じ型なら、この確率でその型
+# 今週の重点。活動の配分のうちこれだけを重点の能力へ寄せる（合計は変えない）
+FOCUS_SHIFT = 0.15
 PARAM_NAMES = {
     'speed': 'スピード', 'stamina': 'スタミナ', 'power': 'パワー',
     'guts': '根性', 'wit': '賢さ', 'dash': '瞬発力',
@@ -125,11 +136,18 @@ def _load_json(path, default):
 # ====================================================
 # 能力の導出
 # ====================================================
-def ability_of(minutes):
-    """その能力に積んだ分数から能力値を求めます。"""
+def ability_of(minutes, factor=1.0, cap=ABILITY_CAP):
+    """その能力に積んだ分数から能力値を求めます。factor は成長型による伸びの係数。"""
     if minutes <= 0:
         return BASE_ABILITY
-    return min(ABILITY_CAP, int(round(BASE_ABILITY + GROWTH_K * minutes ** GROWTH_EXP)))
+    return min(cap, int(round(BASE_ABILITY + GROWTH_K * factor * minutes ** GROWTH_EXP)))
+
+
+def growth_factor(gtype, progress):
+    """成長型と現役の進み具合（0=デビュー、1=引退）から伸びの係数を返します。"""
+    a, b = GROWTH_TYPE_CURVE.get(gtype, (1.0, 1.0))
+    progress = max(0.0, min(1.0, progress))
+    return a + (b - a) * progress
 
 
 def minutes_for(ability):
@@ -139,9 +157,28 @@ def minutes_for(ability):
     return ((ability - BASE_ABILITY) / GROWTH_K) ** (1 / GROWTH_EXP)
 
 
-def derive_params(growth):
+def derive_params(growth, gtype='普通', progress=0.0):
     """成長の生データ（分）から6つの能力値を導出します。"""
-    return {k: ability_of(growth.get(k, 0)) for k in PARAMS}
+    factor = growth_factor(gtype, progress)
+    cap = GROWTH_TYPE_CAP.get(gtype, ABILITY_CAP)
+    return {k: ability_of(growth.get(k, 0), factor, cap) for k in PARAMS}
+
+
+def params_of(horse):
+    """現役馬の今の能力値（成長型と現役の進み具合を織り込む）。"""
+    progress = slots_used(horse) / RETIRE_STARTS
+    return derive_params(horse['growth'], horse.get('growth_type', '普通'), progress)
+
+
+def random_growth_type(rng):
+    return rng.choices(GROWTH_TYPES, weights=GROWTH_TYPE_WEIGHTS)[0]
+
+
+def inherit_growth_type(sire_type, dam_type, rng):
+    """両親が同じ型なら7割でその型。違えばどちらか。"""
+    if sire_type == dam_type:
+        return sire_type if rng.random() < GROWTH_TYPE_INHERIT else random_growth_type(rng)
+    return rng.choice([sire_type, dam_type])
 
 
 def total_minutes(growth):
@@ -182,7 +219,8 @@ def suggest_name(rng=None, pool=None):
     return rng.choice(NAME_HEAD) + rng.choice(NAME_TAIL)
 
 
-def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=None, line=None):
+def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=None, line=None,
+              growth_type=None):
     """新しい現役馬を1頭つくります。"""
     rng = rng or random.Random()
     today = today or datetime.now(JST).date()
@@ -190,6 +228,7 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
     return {
         'id': str(uuid.uuid4()),
         'name': name,
+        'growth_type': growth_type or random_growth_type(rng),
         'line': line or name,                    # 系統。父から受け継ぐ。初代馬は自分が祖
         'blood': {'nick': False, 'temper': False, 'tags': []},   # 配合で決まる血の効き目
         'sex': sex or rng.choice(['牡', '牝']),
@@ -295,10 +334,12 @@ def load_stable(today=None):
         horse.setdefault('slots', horse.get('record', {}).get('starts', 0))
         horse.setdefault('blood', {'nick': False, 'temper': False, 'tags': []})
         horse.setdefault('line', line_of(horse))
+        horse.setdefault('growth_type', '普通')   # ⭕ 途中の馬の能力を急に変えないので普通
         horse.setdefault('record', {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0})
         horse['pedigree'] = _migrate_pedigree(horse.get('pedigree'))
         for k in PARAMS:
             horse.setdefault('growth', {}).setdefault(k, 0.0)
+    data.setdefault('focus', None)
 
     # ⭕ 資金は配合で初めて使い道ができた。それまでの賞金は成績にしか残っていないので、
     #    現役馬と引退馬の賞金の合計で補う（読み込み時移行の流儀）。
@@ -392,11 +433,12 @@ def add_growth(category, minutes, today=None, data=None, save=True, update_strea
     if not weights or minutes <= 0:
         return {'gains': {}, 'streak': data.get('current_streak', 0),
                 'condition': condition_of(data, today), 'capped': False, 'horse': horse}
+    weights = weights_with_focus(weights, focus_param(data, today))
 
-    before = derive_params(horse['growth'])
+    before = params_of(horse)
     for param, share in weights.items():
         horse['growth'][param] = horse['growth'].get(param, 0) + minutes * share
-    after = derive_params(horse['growth'])
+    after = params_of(horse)
 
     gains = {p: after[p] - before[p] for p in PARAMS if after[p] != before[p]}
     streak = _update_streak(data, today) if update_streak else data.get('current_streak', 0)
@@ -447,12 +489,12 @@ def backfill(category, dates, minutes=None, data=None, save=True):
                 'condition': condition_of(data), 'capped': False,
                 'horse': data['current'], 'days': 0}
 
-    before = derive_params(data['current']['growth'])
+    before = params_of(data['current'])
     result = None
     for day in dates[:BACKFILL_MAX_DATES]:
         result = add_growth(category, minutes, today=day, data=data,
                             save=False, update_streak=False)
-    after = derive_params(data['current']['growth'])
+    after = params_of(data['current'])
 
     if save:
         save_stable(data)
@@ -469,7 +511,7 @@ def player_entry(horse, data=None, today=None):
     """自分の馬を rivals.build_field() に渡せる形にします。"""
     return {
         'name': horse['name'],
-        'params': derive_params(horse['growth']),
+        'params': params_of(horse),
         'aptitude': dict(horse['aptitude']),
         'style': horse.get('style', '差し'),
         'condition': condition_of(data, today) if data is not None else 0,
@@ -681,7 +723,7 @@ def retire(data, today=None, save=False):
     today = today or datetime.now(JST).date()
     horse = data['current']
     horse['retired_on'] = today.isoformat()
-    horse['final_params'] = derive_params(horse['growth'])
+    horse['final_params'] = params_of(horse)
 
     data['retired'].append(horse)
     # ⭕ 引退馬は配合の相手になるので、能力・成績・適性・血統を持った実体として残す。
@@ -694,6 +736,7 @@ def retire(data, today=None, save=False):
         'stud_value': round(stud_value(horse), 3),
         'pedigree': horse.get('pedigree') or {'sire': None, 'dam': None},
         'line': line_of(horse),
+        'growth_type': horse.get('growth_type', '普通'),
     })
 
     rng = random.Random(horse['id'])
@@ -783,7 +826,8 @@ def breed(a, b, name=None, today=None, rng=None):
     growth = {k: (ma[k] + mb[k]) / 2 * INHERIT_RATE * value * (1 + fx['bonus']) for k in PARAMS}
     foal = new_horse(name=name, growth=growth,
                      pedigree={'sire': pedigree_of(sire), 'dam': pedigree_of(dam)},
-                     today=today, rng=rng, line=line_of(sire))
+                     today=today, rng=rng, line=line_of(sire),
+                     growth_type=inherit_growth_type(growth_type_of(sire), growth_type_of(dam), rng))
     foal['aptitude'] = inherit_aptitude(sire['aptitude'], dam['aptitude'], rng)
     if fx['nick']:
         # ⭕ ニックスは適性でも効く：親で一番差のある項目を、良いほうで確定させる
@@ -794,6 +838,62 @@ def breed(a, b, name=None, today=None, rng=None):
             foal['aptitude'][key] = APTITUDE_GRADES[min(grade(sire['aptitude'], key), grade(dam['aptitude'], key))]
     foal['blood'] = {'nick': fx['nick'], 'temper': fx['temper'], 'tags': fx['tags']}
     return foal
+
+
+
+# ====================================================
+# 🎯 今週の重点（調教メニュー）
+# ====================================================
+# ⭕ 活動と能力の対応は固定だが、週に1回だけ「重点」を選べる。その週の記録は活動の配分の
+#    うち FOCUS_SHIFT ぶんを重点の能力へ寄せる。合計は変えないので総量は同じで、
+#    振り先だけが動く。「今週は何をやるか」が育成と直結する。
+def week_key(day):
+    y, w, _ = day.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def focus_param(data, today=None):
+    """今週の重点の能力。指定が無い・先週のものなら None。"""
+    today = today or datetime.now(JST).date()
+    focus = data.get('focus')
+    if focus and focus.get('week') == week_key(today) and focus.get('param') in PARAMS:
+        return focus['param']
+    return None
+
+
+def set_focus(param, data=None, today=None, save=True):
+    """今週の重点を決めます。param が None なら解除。"""
+    today = today or datetime.now(JST).date()
+    data = data if data is not None else load_stable(today)
+    if param is not None and param not in PARAMS:
+        raise ValueError('不明な能力です')
+    data['focus'] = {'param': param, 'week': week_key(today)} if param else None
+    if save:
+        save_stable(data)
+    return param
+
+
+def weights_with_focus(weights, focus):
+    """活動の配分に重点を効かせる。重点の能力へ FOCUS_SHIFT を寄せ、残りは比例で削る。"""
+    if not focus:
+        return dict(weights)
+    others = {k: v for k, v in weights.items() if k != focus}
+    total_others = sum(others.values())
+    if total_others <= 0:
+        return dict(weights)
+    shift = min(FOCUS_SHIFT, total_others)
+    out = {k: v * (1 - shift / total_others) for k, v in others.items()}
+    out[focus] = weights.get(focus, 0.0) + shift
+    return out
+
+
+def growth_type_of(parent):
+    """成長型。市場馬は持っていないので名前から決定的に決める。"""
+    if parent.get('growth_type'):
+        return parent['growth_type']
+    import zlib
+    rng = random.Random(zlib.crc32(parent['name'].encode('utf-8')))
+    return random_growth_type(rng)
 
 
 # ====================================================
@@ -925,6 +1025,7 @@ def market(data, pool=None):
             'name': h['name'], 'sex': h['sex'], 'class': h['class'],
             'params': dict(h['params']), 'aptitude': dict(h['aptitude']),
             'sire': h.get('sire'), 'bms': h.get('bms'),
+            'growth_type': growth_type_of(h),
             'fee': stud_fee(h['class']),
         })
     return out
@@ -999,13 +1100,16 @@ def format_horse(data=None, today=None):
     """現役馬のステータスを Discord 表示用に整形します。"""
     data = data if data is not None else load_stable()
     horse = data['current']
-    params = derive_params(horse['growth'])
+    params = params_of(horse)
     rec = horse['record']
     cond = condition_of(data, today)
 
-    lines = [f"🐎 **第{data.get('generation', 1)}世代 {horse['name']}**（{horse['sex']}）",
+    lines = [f"🐎 **第{data.get('generation', 1)}世代 {horse['name']}**（{horse['sex']}・{horse.get('growth_type', '普通')}）",
              f"クラス: **{horse['class']}** ／ 調子: {CONDITION_LABELS.get(cond, '平常')}"
              f" ／ 脚質: {horse.get('style', '差し')}"]
+    focus = focus_param(data, today)
+    if focus:
+        lines.append(f"🎯 今週の重点: {PARAM_NAMES[focus]}")
 
     for key in PARAMS:
         value = params[key]
@@ -1071,7 +1175,7 @@ def format_candidate(c):
     avg = int(sum(c['params'].get(k, BASE_ABILITY) for k in PARAMS) / len(PARAMS))
     fee = '無料' if c['fee'] == 0 else f"{c['fee']:,}万円"
     origin = '自家' if c['source'] == 'own' else '市場'
-    return (f"[{origin}] **{c['name']}**（{c['sex']}・{c['class']}）能力平均 {avg}"
+    return (f"[{origin}] **{c['name']}**（{c['sex']}・{c['class']}・{growth_type_of(c)}）能力平均 {avg}"
             f" ／ {format_aptitude(c['aptitude'])} ／ {fee}"
             + (f" ／ {' '.join(c['blood_tags'])}" if c.get('blood_tags') else ''))
 

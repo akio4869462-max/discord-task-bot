@@ -116,6 +116,16 @@ def cmd_pedigree(args):
     print(hl.format_pedigree(hl.load_stable()['current']))
 
 
+def cmd_focus(args):
+    key = None if args.param in (None, 'none') else args.param
+    try:
+        hl.set_focus(key)
+    except ValueError as e:
+        print(f"⚠️ {e}（{' / '.join(hl.PARAMS)} / none）")
+        return
+    print(f"🎯 今週の重点: {hl.PARAM_NAMES[key] if key else 'なし'}")
+
+
 def cmd_sim(args):
     """使い捨ての馬で数週間ぶんを早送りし、弧の釣り合いを見る。"""
     tmp = tempfile.mkdtemp()
@@ -159,7 +169,7 @@ def _run_sim(args):
                     finishes.append(out['finish'])
 
         horse = data['current']
-        params = hl.derive_params(horse['growth'])
+        params = hl.params_of(horse)
         avg = int(statistics.fmean(params.values()))
         rec = horse['record']
         weeks_done = week + 1
@@ -217,6 +227,10 @@ def main():
     p.set_defaults(func=cmd_breed)
 
     sub.add_parser('pedigree', help='現役馬の血統表を見る').set_defaults(func=cmd_pedigree)
+
+    p = sub.add_parser('focus', help='今週の重点を決める')
+    p.add_argument('param', nargs='?', help=' / '.join(hl.PARAMS) + ' / none')
+    p.set_defaults(func=cmd_focus)
 
     p = sub.add_parser('sim', help='数週間ぶんを早送りして釣り合いを見る')
     p.add_argument('--weeks', type=int, default=10)

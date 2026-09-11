@@ -123,6 +123,39 @@ class StableMenuView(View):
     async def breed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await show_breeding(interaction)
 
+    @discord.ui.button(label="🎯 今週の重点", style=discord.ButtonStyle.secondary, row=2)
+    async def focus_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = horse_logic.load_stable()
+        current = horse_logic.focus_param(data)
+        head = (f"今週の重点: **{horse_logic.PARAM_NAMES[current]}**" if current else "今週の重点はまだ決めていません。")
+        await interaction.response.send_message(
+            head + f"\n重点にした能力へ、記録の配分の {int(horse_logic.FOCUS_SHIFT * 100)}% ぶんを寄せます（総量は変わりません）。",
+            view=FocusView(), ephemeral=True)
+
+
+# ====================================================
+# 今週の重点
+# ====================================================
+class FocusView(View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        for i, key in enumerate(horse_logic.PARAMS):
+            self.add_item(FocusButton(key, horse_logic.PARAM_NAMES[key], row=i // 3))
+        self.add_item(FocusButton(None, '重点なし', row=2))
+
+
+class FocusButton(discord.ui.Button):
+    def __init__(self, key, label, row):
+        super().__init__(label=label, row=row,
+                         style=discord.ButtonStyle.primary if key else discord.ButtonStyle.secondary)
+        self.key = key
+
+    async def callback(self, interaction: discord.Interaction):
+        horse_logic.set_focus(self.key)
+        text = (f"🎯 今週の重点を **{horse_logic.PARAM_NAMES[self.key]}** にしました。"
+                if self.key else "🎯 今週の重点を解除しました。")
+        await interaction.response.edit_message(content=text, view=None)
+
 
 # ====================================================
 # 配合
