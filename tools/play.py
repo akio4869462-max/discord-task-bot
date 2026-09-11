@@ -71,19 +71,20 @@ def cmd_enter(args):
 
 
 def cmd_race(args):
-    outcome = hl.run_entry()
-    if outcome is None:
+    outcomes = hl.run_entries()
+    if not outcomes:
         print("⚠️ 出走登録がありません。先に enter してください。")
         return
-    print(hl.format_result(outcome))
-
-    path = os.path.join(tempfile.gettempdir(),
-                        f"race_{outcome['race']['id'].replace(':', '-')}.html")
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(make_viewer.render(outcome['result']))
-    print(f"\n🎬 再生用HTML: {path}")
-    if args.open:
-        webbrowser.open('file://' + path.replace('\\', '/'))
+    for outcome in outcomes:
+        print(f"🐎 {outcome['horse_name']}")
+        print(hl.format_result(outcome))
+        path = os.path.join(tempfile.gettempdir(),
+                            f"race_{outcome['race']['id'].replace(':', '-')}.html")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(make_viewer.render(outcome['result']))
+        print(f"\n🎬 再生用HTML: {path}\n")
+        if args.open:
+            webbrowser.open('file://' + path.replace('\\', '/'))
 
 
 def cmd_breed(args):
@@ -114,6 +115,47 @@ def cmd_breed(args):
 
 def cmd_pedigree(args):
     print(hl.format_pedigree(hl.load_stable()['current']))
+
+
+def cmd_horses(args):
+    data = hl.load_stable()
+    for i, h in enumerate(data['horses'], start=1):
+        role = '主戦' if hl.is_main(data, h) else '併せ馬'
+        sel = '→' if h is data['current'] else ' '
+        print(f"{sel}{i}. {h['name']}（{h['sex']}・{h['class']}・{h.get('growth_type', '普通')}・{role}）"
+              f" {h['record']['starts']}戦{h['record']['win']}勝" + (f" 📋{h['entry']['name']}" if h.get('entry') else ''))
+
+
+def cmd_select(args):
+    data = hl.load_stable()
+    if not 1 <= args.number <= len(data['horses']):
+        print(f"⚠️ 1〜{len(data['horses'])} で指定してください。")
+        return
+    h = data['horses'][args.number - 1]
+    if args.main:
+        hl.set_main(data, h['id'])
+        print(f"⭐ {h['name']} を主戦にしました。")
+    else:
+        hl.select_horse(data, h['id'])
+        print(f"🐎 {h['name']} を選びました。")
+
+
+def cmd_auction(args):
+    data = hl.load_stable()
+    if args.buy is None:
+        print(hl.format_auction(data))
+        print("\n買うには: python tools/play.py auction --buy <番号> [--name 名前]")
+        return
+    lots = hl.auction(data)
+    if not 1 <= args.buy <= len(lots):
+        print(f"⚠️ 1〜{len(lots)} で指定してください。")
+        return
+    try:
+        foal, price = hl.buy_foal(lots[args.buy - 1]['key'], name=args.name, data=data)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+    print(f"🐴 {foal['name']} を {price:,}万円で買いました。厩舎 {len(data['horses'])}/{hl.MAX_HORSES}頭")
 
 
 def cmd_focus(args):
@@ -227,6 +269,18 @@ def main():
     p.set_defaults(func=cmd_breed)
 
     sub.add_parser('pedigree', help='現役馬の血統表を見る').set_defaults(func=cmd_pedigree)
+
+    sub.add_parser('horses', help='厩舎の馬を一覧する').set_defaults(func=cmd_horses)
+
+    p = sub.add_parser('select', help='見る馬を切り替える（--main で主戦にする）')
+    p.add_argument('number', type=int, help='horses で表示された番号')
+    p.add_argument('--main', action='store_true')
+    p.set_defaults(func=cmd_select)
+
+    p = sub.add_parser('auction', help='セリを見る・仔馬を買う')
+    p.add_argument('--buy', type=int, help='auction で表示された番号')
+    p.add_argument('--name', help='仔馬の名前')
+    p.set_defaults(func=cmd_auction)
 
     p = sub.add_parser('focus', help='今週の重点を決める')
     p.add_argument('param', nargs='?', help=' / '.join(hl.PARAMS) + ' / none')

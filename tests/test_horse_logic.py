@@ -629,7 +629,7 @@ def test_weekly_summary_survives_a_generation_change():
     # 前の馬の今週分 ＋ 新馬の今週分。配合で受け継いだ初期値は数えない
     assert f"今週の調教: {(parent_week + child_week) / 60:.1f}時間" in msg
     assert '今週の出走: 1戦' in msg
-    assert '世代交代' in msg
+    assert 'が引退しました' in msg
 
 
 def test_weekly_summary_lists_the_races_of_the_week():

@@ -202,7 +202,7 @@ def test_morning_notice_mentions_the_overseas_day():
 
 def test_morning_notice_tells_an_ineligible_horse_the_condition():
     text = hl.format_race_day_notice(data=g1_horse(g1_wins=1), today=OVERSEAS_DAY)
-    assert '出られません' in text and '2勝で解放' in text
+    assert '海外遠征日' in text and 'G1 2勝以上' in text
 
 
 def test_morning_notice_explains_the_rest_day():

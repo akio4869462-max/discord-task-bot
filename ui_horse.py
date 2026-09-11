@@ -79,9 +79,16 @@ class StableMenuView(View):
     def __init__(self):
         super().__init__(timeout=120)
         data = horse_logic.load_stable()
-        if data['current'].get('entry'):
+        horse = data['current']
+        if horse.get('entry'):
             self.race_btn.label = "🏁 出走登録済み"
             self.race_btn.style = discord.ButtonStyle.secondary
+        # ⭕ 多頭のときは、どの馬を見ているかを常に出す。切替はセレクト（行3）
+        if len(data['horses']) > 1:
+            self.status_btn.label = f"🐎 {horse['name']}"[:80]
+            self.add_item(HorseSelect(data))
+        if not horse_logic.is_main(data, horse) and len(data['horses']) > 1:
+            self.main_btn.disabled = False
 
     @discord.ui.button(label="📖 調教を記録", style=discord.ButtonStyle.success, row=0)
     async def work_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -123,6 +130,18 @@ class StableMenuView(View):
     async def breed_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await show_breeding(interaction)
 
+    @discord.ui.button(label="⭐ 主戦にする", style=discord.ButtonStyle.secondary, row=2, disabled=True)
+    async def main_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = horse_logic.load_stable()
+        horse_logic.set_main(data, data['current']['id'])
+        await interaction.response.send_message(
+            f"⭐ **{data['current']['name']}** を主戦にしました。これからの記録は全部この馬に入ります"
+            f"（他の馬には{int(horse_logic.SUB_SHARE * 100)}%）。", ephemeral=True)
+
+    @discord.ui.button(label="🐴 セリ", style=discord.ButtonStyle.secondary, row=2)
+    async def auction_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await show_auction(interaction)
+
     @discord.ui.button(label="🎯 今週の重点", style=discord.ButtonStyle.secondary, row=2)
     async def focus_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         data = horse_logic.load_stable()
@@ -131,6 +150,112 @@ class StableMenuView(View):
         await interaction.response.send_message(
             head + f"\n重点にした能力へ、記録の配分の {int(horse_logic.FOCUS_SHIFT * 100)}% ぶんを寄せます（総量は変わりません）。",
             view=FocusView(), ephemeral=True)
+
+
+# ====================================================
+# 馬の切替
+# ====================================================
+class HorseSelect(Select):
+    """厩舎メニューで見る馬を切り替える。ステータス・出走登録・配合はここで選んだ馬に対して行う。"""
+    def __init__(self, data):
+        options = []
+        for h in data['horses']:
+            role = '主戦' if horse_logic.is_main(data, h) else '併せ馬'
+            options.append(discord.SelectOption(
+                label=f"{h['name']}（{h['class']}・{role}）"[:100], value=h['id'],
+                description=(f"{h['record']['starts']}戦{h['record']['win']}勝"
+                             + (f" ／ 📋{h['entry']['name']}" if h.get('entry') else ''))[:100],
+                default=(h['id'] == data['selected'])))
+        super().__init__(placeholder="見る馬を切り替え", options=options, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        data = horse_logic.load_stable()
+        horse = horse_logic.select_horse(data, self.values[0])
+        await interaction.response.edit_message(
+            content=f"🐎 **{horse['name']}** を選びました。", view=StableMenuView())
+
+
+# ====================================================
+# セリ
+# ====================================================
+# ⭕ 仔馬を買って厩舎を増やす（最大3頭）。「セレクト → 確認 → 名前のモーダル」の3段。
+async def show_auction(interaction):
+    data = horse_logic.load_stable()
+    text = horse_logic.format_auction(data)
+    if len(data['horses']) >= horse_logic.MAX_HORSES:
+        await interaction.response.send_message(
+            text + f"\n\n厩舎は{horse_logic.MAX_HORSES}頭までです。引退を待つか、そのまま眺めてください。", ephemeral=True)
+        return
+    lots = horse_logic.auction(data)
+    if not lots:
+        await interaction.response.send_message(text, ephemeral=True)
+        return
+    await interaction.response.send_message(text + "\n\n買う仔馬を選んでください。",
+                                            view=AuctionSelectView(lots), ephemeral=True)
+
+
+class AuctionSelectView(View):
+    def __init__(self, lots):
+        super().__init__(timeout=180)
+        self.add_item(AuctionDropdown(lots))
+
+
+class AuctionDropdown(Select):
+    def __init__(self, lots):
+        self.lots = {lot['key']: lot for lot in lots}
+        options = []
+        for lot in lots:
+            f = lot['foal']
+            options.append(discord.SelectOption(
+                label=f"{f['name']}（{f['sex']}・{f['growth_type']}） {lot['price']:,}万円"[:100],
+                value=lot['key'],
+                description=f"父 {lot['sire']}（{lot['sire_class']}） × 母 {lot['dam']}（{lot['dam_class']}）"[:100]))
+        super().__init__(placeholder="仔馬を選択", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        lot = self.lots[self.values[0]]
+        f = lot['foal']
+        await interaction.response.edit_message(
+            content=(f"**{f['name']}**（{f['sex']}・{f['growth_type']}）\n"
+                     f"父 {lot['sire']}（{lot['sire_class']}） × 母 {lot['dam']}（{lot['dam_class']}）\n"
+                     f"{horse_logic.format_aptitude(f['aptitude'])}\n\n"
+                     f"**{lot['price']:,}万円** で買いますか？"),
+            view=AuctionConfirmView(lot))
+
+
+class AuctionConfirmView(View):
+    def __init__(self, lot):
+        super().__init__(timeout=180)
+        self.lot = lot
+
+    @discord.ui.button(label="買う", style=discord.ButtonStyle.success)
+    async def ok_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AuctionNameModal(self.lot))
+
+    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="買うのはやめました。", view=None)
+
+
+class AuctionNameModal(discord.ui.Modal):
+    def __init__(self, lot):
+        super().__init__(title="仔馬の名前")
+        self.lot = lot
+        self.name_input = discord.ui.TextInput(
+            label="名前（空欄ならそのまま）", required=False, max_length=9, placeholder="カタカナ9文字まで")
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            foal, price = horse_logic.buy_foal(self.lot['key'], name=self.name_input.value)
+        except ValueError as e:
+            await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
+            return
+        data = horse_logic.load_stable()
+        await interaction.response.send_message(
+            f"🐴 **{foal['name']}** を {price:,}万円で買いました。併せ馬として厩舎に入ります"
+            f"（{len(data['horses'])}/{horse_logic.MAX_HORSES}頭 ／ 残り資金 {data['funds']:,}万円）。\n"
+            f"厩舎メニューのセレクトで切り替えて、出走登録や配合ができます。", ephemeral=True)
 
 
 # ====================================================
@@ -576,6 +701,8 @@ async def post_race_result(channel, outcome, mention=None):
     # ⭕ 結果はネタバレで伏せる。開いた瞬間に着順が見えると、再生を先に見る
     #    楽しみが無くなる。タップすれば読める。
     text = horse_logic.format_result(outcome, spoiler=True)
+    if outcome.get('horse_name'):
+        text = f"🐎 **{outcome['horse_name']}**\n{text}"
     if mention:
         text = f"{mention}\n{text}"
 
@@ -593,16 +720,15 @@ async def post_race_result(channel, outcome, mention=None):
 
 
 async def run_pending_race(channel, mention=None):
-    """登録されているレースを実行して結果を投稿します。
+    """登録されている全馬のレースを、主戦から順に実行して結果を投稿します。
 
     Returns:
-        bool: 実行したらTrue、登録が無ければFalse。
+        bool: 1頭でも実行したらTrue、登録が無ければFalse。
     """
-    outcome = await asyncio.to_thread(horse_logic.run_entry)
-    if outcome is None:
-        return False
-    await post_race_result(channel, outcome, mention)
-    return True
+    outcomes = await asyncio.to_thread(horse_logic.run_entries)
+    for outcome in outcomes:
+        await post_race_result(channel, outcome, mention)
+    return bool(outcomes)
 
 
 def format_history(limit=10):

@@ -82,6 +82,13 @@ TRAINING_MINUTES = 60
 TYPING_MINUTES = 60
 
 RETIRE_STARTS = 20          # 何戦（出走枠）で引退するか
+# ⭕ 多頭化：主戦馬1頭＋併せ馬（最大2頭）。記録は主戦に全部入り、併せ馬には同じ記録の
+#    SUB_SHARE が自動で入る（併せ馬効果）。「どの馬を調教するか」は決めなくてよく、
+#    決めるのは「誰を主戦にするか」だけ。同じレースへの2頭出しは不可。
+MAX_HORSES = 3
+SUB_SHARE = 0.5
+AUCTION_SIZE = 6            # セリに出る仔馬の頭数
+AUCTION_PRICE_RATIO = 0.8   # 仔馬の値段 ＝ 両親のクラスの種付け料の平均 × この倍率
 # ⭕ 海外遠征はその週の2開催ぶんを使う。引退は出走枠で数えるので、枠を2つ消費させないと
 #    「1走減る週」が費用にならず、むしろ調教の週が増えて得になってしまう。
 OVERSEAS_SLOTS = 2
@@ -252,15 +259,72 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
 
 
 def _default_stable(today=None):
-    return {
+    horse = new_horse(today=today)
+    return _bind({
         'generation': 1,
-        'current': new_horse(today=today),
+        'horses': [horse],
+        'main': horse['id'],
+        'selected': horse['id'],
         'retired': [],
         'stallions': [],
         'funds': 0,
         'last_active_date': None,
         'current_streak': 0,
-    }
+    })
+
+
+def _bind(data):
+    """data['current'] を「いま選んでいる馬」（horses の中の同じ dict）に向けます。
+
+    ⭕ 既存のロジックと UI は data['current'] を前提に書かれている。多頭化しても
+       「選んでいる馬」をここに束ねておけば、ステータス・出走登録・配合はそのまま動く。
+       保存時には落とす（save_stable）。
+    """
+    horses = data.get('horses') or []
+    if not horses:
+        horse = new_horse()
+        data['horses'] = horses = [horse]
+        data['main'] = data['selected'] = horse['id']
+    ids = {h['id'] for h in horses}
+    if data.get('main') not in ids:
+        data['main'] = horses[0]['id']
+    if data.get('selected') not in ids:
+        data['selected'] = data['main']
+    data['current'] = next(h for h in horses if h['id'] == data['selected'])
+    return data
+
+
+def horse_by_id(data, horse_id):
+    return next((h for h in data['horses'] if h['id'] == horse_id), None)
+
+
+def main_horse(data):
+    return horse_by_id(data, data['main']) or data['horses'][0]
+
+
+def is_main(data, horse):
+    return horse['id'] == data.get('main')
+
+
+def select_horse(data, horse_id, save=True):
+    """厩舎メニューで見る馬を切り替えます。"""
+    if horse_by_id(data, horse_id) is None:
+        raise ValueError('その馬はいません')
+    data['selected'] = horse_id
+    _bind(data)
+    if save:
+        save_stable(data)
+    return data['current']
+
+
+def set_main(data, horse_id, save=True):
+    """主戦馬を切り替えます。記録の全部が入る馬。"""
+    if horse_by_id(data, horse_id) is None:
+        raise ValueError('その馬はいません')
+    data['main'] = horse_id
+    if save:
+        save_stable(data)
+    return horse_by_id(data, horse_id)
 
 
 def _pedigree_node(name, sire=None, dam=None, line=None):
@@ -325,8 +389,14 @@ def load_stable(today=None):
     data.setdefault('stallions', [])
     data.setdefault('current_streak', 0)
     data.setdefault('last_active_date', None)
-    horse = data.get('current')
-    if horse:
+    # ⭕ 1頭だった頃のデータ（current）を horses に読み替える
+    if 'horses' not in data:
+        data['horses'] = [data['current']] if data.get('current') else []
+        if data['horses']:
+            data['main'] = data['selected'] = data['horses'][0]['id']
+    data.pop('current', None)
+    for horse in data['horses']:
+        horse.setdefault('generation', data.get('generation', 1))
         horse.setdefault('entry', None)
         horse.setdefault('history', [])
         horse.setdefault('breeding_plan', None)
@@ -345,7 +415,7 @@ def load_stable(today=None):
     #    現役馬と引退馬の賞金の合計で補う（読み込み時移行の流儀）。
     if 'funds' not in data:
         data['funds'] = sum(h.get('record', {}).get('prize', 0)
-                            for h in [horse] + data['retired'] if h)
+                            for h in data['horses'] + data['retired'] if h)
 
     # 引退馬は配合の相手になるので、選ぶためのidと血統表を持たせる
     retired_by_name = {h['name']: h for h in data['retired']}
@@ -354,14 +424,15 @@ def load_stable(today=None):
         s.setdefault('id', source.get('id') or str(uuid.uuid4()))
         s['pedigree'] = _migrate_pedigree(s.get('pedigree') or source.get('pedigree'))
         s.setdefault('line', source.get('line') or line_of(s))
-    return data
+    return _bind(data)
 
 
 def save_stable(data):
     try:
         os.makedirs(os.path.dirname(STABLE_FILE), exist_ok=True)
+        payload = {k: v for k, v in data.items() if k != 'current'}   # current は horses の別名
         with open(STABLE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
     except IOError as e:
         print(f"⚠️ [ERROR] 厩舎データの保存に失敗しました: {e}")
 
@@ -381,7 +452,7 @@ def _update_streak(data, today):
     return data['current_streak']
 
 
-def condition_of(data, today=None):
+def condition_of(data, today=None, horse=None):
     """調子（-2〜+2）。連続記録が伸びるほど良く、間が空くほど落ちます。"""
     today = today or datetime.now(JST).date()
     last = data.get('last_active_date')
@@ -394,7 +465,7 @@ def condition_of(data, today=None):
         return -1
     streak = data.get('current_streak', 0)
     cond = 2 if streak >= 21 else (1 if streak >= 7 else 0)
-    horse = data.get('current') or {}
+    horse = horse or data.get('current') or {}
     if horse.get('blood', {}).get('temper'):
         # ⭕ 気性難は日によって調子が荒れる（3日に1日ほど1段落ちる）。日付と馬で決まる
         import zlib
@@ -427,7 +498,7 @@ def add_growth(category, minutes, today=None, data=None, save=True, update_strea
     """
     today = today or datetime.now(JST).date()
     data = data if data is not None else load_stable(today)
-    horse = data['current']
+    horse = main_horse(data)
 
     weights = ACTIVITY_PARAMS.get(category)
     if not weights or minutes <= 0:
@@ -436,8 +507,10 @@ def add_growth(category, minutes, today=None, data=None, save=True, update_strea
     weights = weights_with_focus(weights, focus_param(data, today))
 
     before = params_of(horse)
-    for param, share in weights.items():
-        horse['growth'][param] = horse['growth'].get(param, 0) + minutes * share
+    for h in data['horses']:
+        share_of = 1.0 if h is horse else SUB_SHARE          # 併せ馬には半分
+        for param, share in weights.items():
+            h['growth'][param] = h['growth'].get(param, 0) + minutes * share * share_of
     after = params_of(horse)
 
     gains = {p: after[p] - before[p] for p in PARAMS if after[p] != before[p]}
@@ -487,14 +560,14 @@ def backfill(category, dates, minutes=None, data=None, save=True):
     if not minutes or not dates:
         return {'gains': {}, 'streak': data.get('current_streak', 0),
                 'condition': condition_of(data), 'capped': False,
-                'horse': data['current'], 'days': 0}
+                'horse': main_horse(data), 'days': 0}
 
-    before = params_of(data['current'])
+    before = params_of(main_horse(data))
     result = None
     for day in dates[:BACKFILL_MAX_DATES]:
         result = add_growth(category, minutes, today=day, data=data,
                             save=False, update_streak=False)
-    after = params_of(data['current'])
+    after = params_of(main_horse(data))
 
     if save:
         save_stable(data)
@@ -514,7 +587,7 @@ def player_entry(horse, data=None, today=None):
         'params': params_of(horse),
         'aptitude': dict(horse['aptitude']),
         'style': horse.get('style', '差し'),
-        'condition': condition_of(data, today) if data is not None else 0,
+        'condition': condition_of(data, today, horse) if data is not None else 0,
         # 気性難（濃いインブリード）は不利を受けやすい
         'trouble_scale': TEMPER_TROUBLE_SCALE if horse.get('blood', {}).get('temper') else 1.0,
     }
@@ -523,14 +596,15 @@ def player_entry(horse, data=None, today=None):
 RACE_HOUR = 20              # 開催日にレースが走る時刻（main.py の夜の分岐と同じ）
 
 
-def available_races(data=None, on=None, now=None):
+def available_races(data=None, on=None, now=None, horse=None):
     """次の開催日に出走できるレースを返します。
 
     ⭕ 開催日の20:00を過ぎていたら、その日の番組はもう走っているので次の開催日を出す。
        そうしないと当日の日付で登録され、次の開催日に「古いレース」として走ってしまう。
+    ⭕ 他の馬が登録済みのレースは出さない（同じレースへの2頭出しは不可）。
     """
     data = data if data is not None else load_stable()
-    horse = data['current']
+    horse = horse or data['current']
     if on is None:
         now = now or datetime.now(JST)
         on = now.date()
@@ -539,13 +613,21 @@ def available_races(data=None, on=None, now=None):
     day = race_calendar.next_race_day(on)
     if rest_reason(horse, day):
         return day, []
-    races = race_calendar.offers(horse['class'], day, aptitude=horse['aptitude'])
+    taken = {h['entry']['id'] for h in data.get('horses', []) if h is not horse and h.get('entry')}
+    # ⭕ 同じクラスの馬が同じ日の番組を取り合って地元（遠征費0）が残っていなければ、
+    #    別の番組（variant）を出す。1頭なら variant 0 のまま。
+    races = []
+    for variant in range(MAX_HORSES):
+        races = [r for r in race_calendar.offers(horse['class'], day, aptitude=horse['aptitude'], variant=variant)
+                 if r['id'] not in taken]
+        if any(r.get('travel', 0) == 0 for r in races):
+            break
     if overseas_eligible(horse):
-        races = races + race_calendar.overseas_offers(day)
+        races = races + [r for r in race_calendar.overseas_offers(day) if r['id'] not in taken]
     return day, races
 
 
-def enter_race(race, style=None, data=None, save=True):
+def enter_race(race, style=None, data=None, save=True, horse=None):
     """出走を登録します。脚質はここで宣言します（意思であって確約ではない）。
 
     遠征費（race['travel']）は登録時に資金から引きます。番組表には遠征費0の地元レースが
@@ -555,8 +637,10 @@ def enter_race(race, style=None, data=None, save=True):
         ValueError: 遠征費を払えない
     """
     data = data if data is not None else load_stable()
-    horse = data['current']
+    horse = horse or data['current']
     travel = race.get('travel', 0)
+    if any(h is not horse and h.get('entry') and h['entry']['id'] == race['id'] for h in data['horses']):
+        raise ValueError("そのレースには別の馬を登録しています（同じレースへの2頭出しはできません）。")
     if travel > data.get('funds', 0):
         raise ValueError(f"遠征費が払えません（{travel:,}万円 ／ 手元 {data.get('funds', 0):,}万円）。"
                          f"地元（東京・中山）のレースなら遠征費はかかりません。")
@@ -571,13 +655,14 @@ def enter_race(race, style=None, data=None, save=True):
     return horse['entry']
 
 
-def cancel_entry(data=None, save=True):
+def cancel_entry(data=None, save=True, horse=None):
     """出走登録を取り消し、遠征費を戻します。"""
     data = data if data is not None else load_stable()
-    entry = data['current'].get('entry')
+    horse = horse or data['current']
+    entry = horse.get('entry')
     if entry:
         data['funds'] = data.get('funds', 0) + entry.get('travel', 0)
-    data['current']['entry'] = None
+    horse['entry'] = None
     if save:
         save_stable(data)
 
@@ -588,7 +673,7 @@ def _race_seed(horse, race):
     return zlib.crc32((horse['id'] + '|' + race['id']).encode('utf-8'))
 
 
-def run_entry(data=None, today=None, save=True):
+def run_entry(data=None, today=None, save=True, horse=None):
     """登録したレースを実行し、結果を厩舎に反映します。
 
     Returns:
@@ -596,7 +681,7 @@ def run_entry(data=None, today=None, save=True):
             登録が無ければ None。
     """
     data = data if data is not None else load_stable()
-    horse = data['current']
+    horse = horse or data['current']
     race = horse.get('entry')
     if not race:
         return None
@@ -607,16 +692,34 @@ def run_entry(data=None, today=None, save=True):
     result = engine.simulate(race, entries, seed=seed)
 
     mine = next(h for h in result['horses'] if h['is_player'])
-    events = _apply_result(data, race, mine, today, len(result['horses']))
     horse['entry'] = None
+    events = _apply_result(data, race, mine, today, len(result['horses']), horse)
     if save:
         save_stable(data)
-    return {'result': result, 'finish': mine['finish'], 'events': events, 'race': race}
+    return {'result': result, 'finish': mine['finish'], 'events': events, 'race': race,
+            'horse_name': horse['name']}
 
 
-def _apply_result(data, race, mine, today, field_size):
+def run_entries(data=None, today=None, save=True):
+    """登録されている全馬のレースを、主戦から順に実行します。
+
+    Returns:
+        list: run_entry() の結果のリスト（登録が無い馬は含まない）
+    """
+    data = data if data is not None else load_stable()
+    order = sorted(list(data['horses']), key=lambda h: 0 if is_main(data, h) else 1)
+    outcomes = []
+    for horse in order:
+        if horse.get('entry'):
+            outcomes.append(run_entry(data=data, today=today, save=False, horse=horse))
+    if save and outcomes:
+        save_stable(data)
+    return outcomes
+
+
+def _apply_result(data, race, mine, today, field_size, horse=None):
     """着順を成績に反映し、昇級と引退を判定します。"""
-    horse = data['current']
+    horse = horse or data['current']
     rec = horse['record']
     before = slots_used(horse)          # ⭕ starts を足す前に取る（古いデータは starts で補うため）
     rec['starts'] += 1
@@ -664,7 +767,7 @@ def _apply_result(data, race, mine, today, field_size):
         events.append(f"🧬 {BREEDING_OPEN_STARTS}戦目。次の世代の配合を予約できるようになりました。"
                       f"（残り{slots_left(horse)}戦）")
     if slots_used(horse) >= RETIRE_STARTS:
-        events.append(retire(data, today))
+        events.append(retire(data, today, horse=horse))
     return events
 
 
@@ -718,10 +821,10 @@ def stud_value(horse):
     return bonus
 
 
-def retire(data, today=None, save=False):
-    """現役馬を引退させ、次世代を迎えます。"""
+def retire(data, today=None, save=False, horse=None):
+    """現役馬を引退させ、その馬の枠に仔を置きます。主戦が引退すれば仔が主戦を継ぎます。"""
     today = today or datetime.now(JST).date()
-    horse = data['current']
+    horse = horse or data['current']
     horse['retired_on'] = today.isoformat()
     horse['final_params'] = params_of(horse)
 
@@ -730,7 +833,7 @@ def retire(data, today=None, save=False):
     #    名前だけの飾りにするとデータ構造から作り直すことになる。
     data['stallions'].append({
         'id': horse['id'], 'name': horse['name'], 'sex': horse['sex'],
-        'class': horse['class'], 'generation': data.get('generation', 1),
+        'class': horse['class'], 'generation': horse.get('generation', 1),
         'params': horse['final_params'], 'growth': dict(horse['growth']),
         'aptitude': dict(horse['aptitude']), 'record': dict(horse['record']),
         'stud_value': round(stud_value(horse), 3),
@@ -742,23 +845,36 @@ def retire(data, today=None, save=False):
     rng = random.Random(horse['id'])
     plan = horse.get('breeding_plan')
     parent = horse['name']
-    data['generation'] = data.get('generation', 1) + 1
+    generation = horse.get('generation', 1) + 1
+    data['generation'] = max(data.get('generation', 1), generation)
     if plan:
-        data['current'] = breed(horse, plan['partner'], name=plan.get('foal_name'),
-                                today=today, rng=rng)
-        tags = data['current'].get('blood', {}).get('tags', [])
+        foal = breed(horse, plan['partner'], name=plan.get('foal_name'), today=today, rng=rng)
+        tags = foal.get('blood', {}).get('tags', [])
         born = (f"🧬 {_sire_dam(horse, plan['partner'])} の仔、"
-                f"第{data['generation']}世代 {data['current']['name']} がデビューします。"
+                f"第{generation}世代 {foal['name']} がデビューします。"
                 + (f"（{' '.join(tags)}）" if tags else ''))
     else:
         inherited = {k: horse['growth'].get(k, 0) * INHERIT_RATE * stud_value(horse)
                      for k in PARAMS}
-        data['current'] = new_horse(
+        foal = new_horse(
             growth=inherited,
             pedigree={'sire': pedigree_of(horse) if horse['sex'] == '牡' else None,
                       'dam': pedigree_of(horse) if horse['sex'] == '牝' else None},
             today=today, rng=rng)
-        born = f"第{data['generation']}世代 {data['current']['name']} がデビューします。"
+        born = f"第{generation}世代 {foal['name']} がデビューします。"
+    foal['generation'] = generation
+
+    # ⭕ 引退した馬の枠に仔を置く。主戦・選択がその馬を指していれば仔が引き継ぐ
+    idx = next((i for i, h in enumerate(data['horses']) if h['id'] == horse['id']), None)
+    if idx is None:
+        data['horses'].append(foal)
+    else:
+        data['horses'][idx] = foal
+    if data.get('main') == horse['id']:
+        data['main'] = foal['id']
+    if data.get('selected') == horse['id']:
+        data['selected'] = foal['id']
+    _bind(data)
     if save:
         save_stable(data)
     return f"🎓 {parent} が{RETIRE_STARTS}戦を走り切って引退しました。{born}"
@@ -1093,6 +1209,85 @@ def cancel_breeding(data=None, save=True):
     return plan
 
 
+
+# ====================================================
+# 🐴 セリ（仔馬を買って厩舎を増やす）
+# ====================================================
+# ⭕ 配合だけでは頭数が増えない（引退1頭に仔1頭）。資金の出口にもなる。
+#    週ごとに6頭。両親は市場の馬から組み、血統と成長型を見て選ぶ。
+def _auction_seed(data, today):
+    import zlib
+    return zlib.crc32(f"{main_horse(data)['id']}|auction|{week_key(today)}".encode('utf-8'))
+
+
+def auction(data, today=None, pool=None):
+    """今週のセリに出ている仔馬の一覧。"""
+    today = today or datetime.now(JST).date()
+    try:
+        horses = (pool or rivals.load_pool())['horses']
+    except (IOError, KeyError):
+        return []
+    rng = random.Random(_auction_seed(data, today))
+    sires = [h for h in horses if h['sex'] == '牡']
+    dams = [h for h in horses if h['sex'] == '牝']
+    if not sires or not dams:
+        return []
+    foals = []
+    for i in range(AUCTION_SIZE):
+        sire, dam = rng.choice(sires), rng.choice(dams)
+        foal = breed(sire, dam, today=today, rng=rng)
+        foal['generation'] = 1
+        price = int((stud_fee(sire['class']) + stud_fee(dam['class'])) / 2 * AUCTION_PRICE_RATIO)
+        foals.append({'key': f'auction:{i}', 'foal': foal, 'price': price,
+                      'sire': sire['name'], 'dam': dam['name'],
+                      'sire_class': sire['class'], 'dam_class': dam['class']})
+    return foals
+
+
+def buy_foal(key, name=None, data=None, today=None, save=True, pool=None):
+    """セリで仔馬を買い、厩舎に加えます（併せ馬として）。
+
+    Raises:
+        ValueError: 満杯・見つからない・資金不足
+    """
+    data = data if data is not None else load_stable()
+    today = today or datetime.now(JST).date()
+    if len(data['horses']) >= MAX_HORSES:
+        raise ValueError(f"厩舎は{MAX_HORSES}頭までです。")
+    lot = next((f for f in auction(data, today, pool) if f['key'] == key), None)
+    if lot is None:
+        raise ValueError('その仔馬はもうセリにいません。')
+    if lot['price'] > data.get('funds', 0):
+        raise ValueError(f"資金が足りません（{lot['price']:,}万円 ／ 手元 {data.get('funds', 0):,}万円）")
+    foal = lot['foal']
+    if name and name.strip():
+        foal['name'] = name.strip()
+    data['funds'] -= lot['price']
+    data['horses'].append(foal)
+    data['auction_bought'] = data.get('auction_bought', []) + [key + '|' + week_key(today)]
+    _bind(data)
+    if save:
+        save_stable(data)
+    return foal, lot['price']
+
+
+def format_auction(data, today=None, pool=None):
+    today = today or datetime.now(JST).date()
+    lots = auction(data, today, pool)
+    head = (f"🐴 **今週のセリ** ／ 厩舎資金 {data.get('funds', 0):,}万円"
+            f" ／ 厩舎 {len(data['horses'])}/{MAX_HORSES}頭")
+    if not lots:
+        return head + "\n出品がありません。"
+    lines = [head, '']
+    for i, lot in enumerate(lots, start=1):
+        f = lot['foal']
+        lines.append(f"{i}. **{f['name']}**（{f['sex']}・{f['growth_type']}） 父 {lot['sire']}（{lot['sire_class']}）"
+                     f" × 母 {lot['dam']}（{lot['dam_class']}） ／ {format_aptitude(f['aptitude'])}"
+                     + (f" ／ {' '.join(f['blood']['tags'])}" if f.get('blood', {}).get('tags') else '')
+                     + f" ／ {lot['price']:,}万円")
+    return '\n'.join(lines)
+
+
 # ====================================================
 # 表示
 # ====================================================
@@ -1102,9 +1297,10 @@ def format_horse(data=None, today=None):
     horse = data['current']
     params = params_of(horse)
     rec = horse['record']
-    cond = condition_of(data, today)
+    cond = condition_of(data, today, horse)
 
-    lines = [f"🐎 **第{data.get('generation', 1)}世代 {horse['name']}**（{horse['sex']}・{horse.get('growth_type', '普通')}）",
+    role = '主戦' if is_main(data, horse) else '併せ馬'
+    lines = [f"🐎 **第{horse.get('generation', 1)}世代 {horse['name']}**（{horse['sex']}・{horse.get('growth_type', '普通')}・{role}）",
              f"クラス: **{horse['class']}** ／ 調子: {CONDITION_LABELS.get(cond, '平常')}"
              f" ／ 脚質: {horse.get('style', '差し')}"]
     focus = focus_param(data, today)
@@ -1139,6 +1335,13 @@ def format_horse(data=None, today=None):
         p = plan['partner']
         lines.append(f"🧬 配合予約: {p['name']}（{p['class']}）"
                      + (f" 仔の名前 {plan['foal_name']}" if plan.get('foal_name') else ''))
+    others = [h for h in data['horses'] if h is not horse]
+    if others:
+        lines.append('— 他の馬 —')
+        for h in others:
+            mark = '主戦' if is_main(data, h) else '併せ馬'
+            lines.append(f"　{h['name']}（{h['class']}・{mark}）{h['record']['starts']}戦{h['record']['win']}勝"
+                         + (f" 📋{h['entry']['name']}" if h.get('entry') else ''))
     return '\n'.join(lines)
 
 
@@ -1200,128 +1403,120 @@ def format_race_day_notice(data=None, today=None):
     """開催日の朝に出す告知。開催日でなければ None を返します。
 
     ⭕ レースは20:00に自動で走るが、出走登録が無いと何も言われずに開催日が過ぎる。
-       朝のうちに気づけるよう、登録の有無で文言を変えて出す。
+       朝のうちに気づけるよう、馬ごとに登録の有無で文言を変えて出す。
     """
     today = today or datetime.now(JST).date()
     if not race_calendar.is_race_day(today):
         return None
 
     data = data if data is not None else load_stable()
-    horse = data['current']
-    cond = condition_of(data, today)
-    entry = horse.get('entry')
+    lines = [f"🏁 **今日は開催日（{today.isoformat()}）**"]
 
-    header = f"🏁 **今日は開催日（{today.isoformat()}）**"
-    state = (f"🐎 {horse['name']}（{horse['class']}）"
-             f" 調子: {CONDITION_LABELS.get(cond, '平常')}"
-             f" ／ 脚質: {horse.get('style', '差し')}")
-
-    ok, _ = breeding_status(horse)
-    if ok:
-        state += f"\n🧬 配合を予約できます（残り{slots_left(horse)}戦）"
-
-    resting = rest_reason(horse, today)
-    if resting:
-        return '\n'.join([header, state, f"✈️ {resting}"])
-
-    # ⭕ 海外遠征は月1回なので、当日と1週間前に知らせる。資格が無ければ条件だけ出す。
+    # ⭕ 海外遠征は月1回なので、当日と1週間前に知らせる（厩舎に1回だけ）
     if race_calendar.is_overseas_day(today):
         dest = race_calendar.overseas_destination(today)
-        if overseas_eligible(horse):
-            state += f"\n🌏 **今日は海外遠征日（{dest['venue']}）。** 出走枠を2つ使い、次の開催日は休みになります。"
-        else:
-            state += (f"\n🌏 今日は海外遠征日（{dest['venue']}）ですが、G1 {g1_wins(horse)}勝なので出られません"
-                      f"（{race_calendar.OVERSEAS_G1_WINS}勝で解放）。")
-    elif race_calendar.is_overseas_day(today + timedelta(days=7)) and overseas_eligible(horse):
+        lines.append(f"🌏 今日は海外遠征日（{dest['venue']}）。G1 {race_calendar.OVERSEAS_G1_WINS}勝以上の馬が出られます。"
+                     f"出走枠を2つ使い、次の開催日は休みになります。")
+    elif race_calendar.is_overseas_day(today + timedelta(days=7)) and any(overseas_eligible(h) for h in data['horses']):
         dest = race_calendar.overseas_destination(today + timedelta(days=7))
-        state += f"\n🌏 来週の土曜は海外遠征日（{dest['venue']}）。遠征費 {dest['travel']:,}万円。"
+        lines.append(f"🌏 来週の土曜は海外遠征日（{dest['venue']}）。遠征費 {dest['travel']:,}万円。")
 
-    if entry:
-        # ⭕ run_entry() は登録の日付を見ないので、前回走り損なった登録は今夜そのまま走る。
-        #    黙って古いレースを走らせると面食らうので、今日のものでなければそう言う。
-        if entry.get('date') != today.isoformat():
-            return '\n'.join([
-                header, state,
-                f"📋 登録は **{entry['date']} {entry['name']}** のままです。"
-                f"今夜20:00にはこのレースが走ります。"
-                f"今日の番組から選び直すなら、厩舎で登録を取り直してください。",
-            ])
-        grade = f" [{entry['grade']}]" if entry.get('grade') else ''
-        return '\n'.join([
-            header, state,
-            f"📋 **{entry['name']}**{grade} "
-            f"{entry['course']}{entry['surface']}{entry['distance']}m {entry['cond']}"
-            f" ／ 1着 {entry['prize']:,}万円",
-            "→ **20:00に発走**します。それまでに記録した分は調教に間に合います。",
-        ])
+    missing = []
+    for horse in sorted(data['horses'], key=lambda h: 0 if is_main(data, h) else 1):
+        cond = condition_of(data, today, horse)
+        role = '主戦' if is_main(data, horse) else '併せ馬'
+        head = (f"🐎 **{horse['name']}**（{horse['class']}・{role}） 調子: {CONDITION_LABELS.get(cond, '平常')}"
+                f" ／ 脚質: {horse.get('style', '差し')}")
+        ok, _ = breeding_status(horse)
+        if ok:
+            head += f"\n　🧬 配合を予約できます（残り{slots_left(horse)}戦）"
+        resting = rest_reason(horse, today)
+        if resting:
+            lines.append(head + f"\n　✈️ {resting}")
+            continue
+        entry = horse.get('entry')
+        if entry:
+            if entry.get('date') != today.isoformat():
+                # ⭕ run_entry() は登録の日付を見ないので、前回走り損なった登録は今夜そのまま走る
+                lines.append(head + f"\n　📋 登録は **{entry['date']} {entry['name']}** のままです。"
+                             f"今夜20:00にはこのレースが走ります。今日の番組から選び直すなら取り直してください。")
+            else:
+                grade = f" [{entry['grade']}]" if entry.get('grade') else ''
+                lines.append(head + f"\n　📋 **{entry['name']}**{grade} "
+                             f"{entry['course']}{entry['surface']}{entry['distance']}m {entry['cond']}"
+                             f" ／ 1着 {entry['prize']:,}万円 → **20:00に発走**")
+            continue
+        lines.append(head + "\n　⚠️ **出走登録がありません。**")
+        missing.append(horse)
 
-    day, races = available_races(data=data, on=today)
-    lines = [header, state,
-             "⚠️ **出走登録がありません。** 20:00までに登録しないと今日は走りません。"]
-    if races:
+    if missing:
         lines.append('')
-        lines.append(format_races(day, races))
-    lines.append('')
-    lines.append("厩舎メニューの「🏇 出走登録」か `/entry` から登録できます。")
+        lines.append("20:00までに登録しないと今日は走りません。厩舎メニューの「🏇 出走登録」か `/entry` から。")
+        if len(data['horses']) == 1:
+            day, races = available_races(data=data, on=today)
+            if races:
+                lines.append('')
+                lines.append(format_races(day, races))
+    else:
+        lines.append("それまでに記録した分は調教に間に合います。")
     return '\n'.join(lines)
 
 
 def get_weekly_summary(data=None, today=None, save=True):
-    """週間サマリー。前回からの差分を出し、次回のためのスナップショットを更新します。"""
+    """週間サマリー。主戦の調教量の差分と、全馬の今週のレースを出します。"""
     data = data if data is not None else load_stable()
     today = today or datetime.now(JST).date()
-    horse = data['current']
+    main = main_horse(data)
     snap = data.get('weekly_snapshot') or {}
 
-    minutes = total_minutes(horse['growth'])
-    rec = horse['record']
-    week_minutes = minutes - snap.get('minutes', 0)
-    week_starts = rec['starts'] - snap.get('starts', 0)
-    week_wins = rec['win'] - snap.get('wins', 0)
-    races = list(horse['history'])
-
-    # ⭕ 週の途中で世代交代していると、スナップショットは前の馬のもの。そのまま引くと
-    #    「今週の調教: -38時間」になる。前の馬の残りぶんと新馬のぶんを足し合わせる。
-    changed = snap and snap.get('horse_id') not in (None, horse['id'])
-    if changed:
-        prev = next((h for h in data['retired'] if h['id'] == snap['horse_id']), None)
-        if prev:
-            week_minutes = ((total_minutes(prev['growth']) - snap.get('minutes', 0))
-                            + minutes - horse.get('birth_minutes', 0))
-            week_starts = (prev['record']['starts'] - snap.get('starts', 0)) + rec['starts']
-            week_wins = (prev['record']['win'] - snap.get('wins', 0)) + rec['win']
-            races = prev['history'][snap.get('starts', 0):] + races
-        else:
-            week_minutes = minutes - horse.get('birth_minutes', 0)
-            week_starts, week_wins = rec['starts'], rec['win']
+    # ⭕ 調教量は主戦で数える（記録は全部主戦に入る）。主戦が替わった週は、その馬が
+    #    生まれてから（配合で受け継いだ分を除く）を今週分とみなす。
+    trained = total_minutes(main['growth']) - main.get('birth_minutes', 0)
+    if snap.get('horse_id') == main['id']:
+        week_minutes = trained - snap.get('minutes', 0)
     else:
-        races = races[snap.get('starts', 0):]
+        prev = next((h for h in data['retired'] if h['id'] == snap.get('horse_id')), None)
+        carry = (total_minutes(prev['growth']) - prev.get('birth_minutes', 0) - snap.get('minutes', 0)) if prev else 0
+        week_minutes = max(0, carry) + trained
+    week_minutes = max(0.0, week_minutes)
+
+    # 今週のレースは日付で拾う（全馬＋今週引退した馬）
+    since = (today - timedelta(days=7)).isoformat()
+    races = []
+    for h in data['horses'] + data['retired']:
+        for r in h.get('history', []):
+            if r['date'] >= since:
+                races.append(dict(r, horse=h['name']))
+    races.sort(key=lambda r: r['date'])
 
     msg = "📅 **【週間サマリー】**\n"
-    msg += f"今週の調教: {max(0.0, week_minutes) / 60:.1f}時間\n"
-    if week_starts > 0:
-        msg += f"今週の出走: {week_starts}戦{week_wins}勝\n"
-        for h in races[-week_starts:]:
-            msg += (f"　{h['date'][5:]} {h['race']} {h['course']}{h['surface']}{h['distance']}m"
-                    f" → **{h['finish']}着**/{h['field']}頭\n")
-    if changed:
-        msg += f"🎓 世代交代しました。\n"
-    msg += f"🐎 {horse['name']}（{horse['class']}） 通算 {rec['starts']}戦{rec['win']}勝"
-    msg += f" ／ 残り{slots_left(horse)}戦\n"
+    msg += f"今週の調教: {week_minutes / 60:.1f}時間\n"
+    if races:
+        wins = sum(1 for r in races if r['finish'] == 1)
+        msg += f"今週の出走: {len(races)}戦{wins}勝\n"
+        for r in races:
+            who = f"{r['horse']} " if len(data['horses']) > 1 or data['retired'] else ''
+            msg += (f"　{r['date'][5:]} {who}{r['race']} {r['course']}{r['surface']}{r['distance']}m"
+                    f" → **{r['finish']}着**/{r['field']}頭\n")
+    retired_this_week = [h for h in data['retired'] if h.get('retired_on', '') >= since]
+    for h in retired_this_week:
+        msg += f"🎓 {h['name']} が引退しました。\n"
+    for h in sorted(data['horses'], key=lambda x: 0 if is_main(data, x) else 1):
+        role = '主戦' if is_main(data, h) else '併せ馬'
+        msg += (f"🐎 {h['name']}（{h['class']}・{role}） 通算 {h['record']['starts']}戦{h['record']['win']}勝"
+                f" ／ 残り{slots_left(h)}戦\n")
 
-    prev = snap.get('last_week_minutes')
-    if prev:
-        diff = int((week_minutes - prev) / prev * 100)
+    prev_week = snap.get('last_week_minutes')
+    if prev_week:
+        diff = int((week_minutes - prev_week) / prev_week * 100)
         if diff > 0:
             msg += f"📈 先週より {diff}% 多く積めました。\n"
         elif diff < 0:
             msg += f"📉 先週より {abs(diff)}% 少なめでした。\n"
 
-    # ⭕ 世代交代をまたいでも差分が壊れないよう、スナップショットは撮り直す。
     data['weekly_snapshot'] = {
-        'horse_id': horse['id'],
-        'minutes': minutes, 'starts': rec['starts'], 'wins': rec['win'],
-        'last_week_minutes': max(0, week_minutes), 'date': today.isoformat(),
+        'horse_id': main['id'], 'minutes': trained,
+        'last_week_minutes': week_minutes, 'date': today.isoformat(),
     }
     if save:
         save_stable(data)

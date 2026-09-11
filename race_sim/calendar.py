@@ -161,18 +161,20 @@ def next_race_day(date):
     return date
 
 
-def offers(cls, date, count=OFFER_COUNT, baseline=None, pool=None, aptitude=None):
+def offers(cls, date, count=OFFER_COUNT, baseline=None, pool=None, aptitude=None, variant=0):
     """その日にそのクラスで出走できるレースを count 本組む。
 
     Args:
         cls (str): 馬のクラス。
         date (datetime.date): 開催日。
         aptitude (dict): 馬の適性。あれば得意な条件を優先して提示する。
+        variant (int): 同じ日・同じクラスの別の番組。⭕ 多頭で同じクラスの馬が同じ日の
+            番組を取り合ったとき（2頭出しは不可）に、2組目・3組目を出すために使う。
 
     Returns:
         list: race 辞書のリスト。engine.simulate() にそのまま渡せる形。
     """
-    rng = random.Random(_date_seed(date, cls))
+    rng = random.Random(_date_seed(date, cls if variant == 0 else f"{cls}#{variant}"))
     cands = _candidates(cls, baseline, pool)
     allowed = GRADE_COURSES.get(cls)
     if allowed:
@@ -207,9 +209,12 @@ def offers(cls, date, count=OFFER_COUNT, baseline=None, pool=None, aptitude=None
 
     info = CLASS_INFO.get(cls, CLASS_INFO['1勝'])
     races, used_names = [], set()
+    suffix = f"-v{variant}" if variant else ''
     for i, (course, surface, distance) in enumerate(picked):
         races.append({
-            'id': f"{date.isoformat()}-{cls}-{i}",
+            # ⭕ id は条件で決める。番号だと、適性で並び替えた別のレースが同じidになり、
+            #    多頭のとき「同じレースか」の判定（2頭出し不可）が狂う。
+            'id': f"{date.isoformat()}-{cls}-{course}{surface}{distance}{suffix}",
             'name': _race_name(rng, cls, used_names),
             'date': date.isoformat(),
             'course': course,

@@ -157,7 +157,7 @@ class MainMenuView(View):
         super().__init__(timeout=None)
         # ⭕ 出走を控えているときはボタンで分かるようにする（旧RPGのボス襲来表示の後継）。
         data = horse_logic.load_stable()
-        if data['current'].get('entry'):
+        if any(h.get('entry') for h in data['horses']):
             self.stable_menu.style = discord.ButtonStyle.danger
             self.stable_menu.label = "🏁 出走間近！厩舎"
         else:

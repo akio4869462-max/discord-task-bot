@@ -90,7 +90,7 @@ def test_old_data_keeps_the_normal_type_and_shows_it(tmp_path):
         json.dump(stable, f, ensure_ascii=False)
     data = hl.load_stable(TODAY)
     assert data['current']['growth_type'] == '普通'      # 途中の馬の能力を急に変えない
-    assert '普通）' in hl.format_horse(data, TODAY)
+    assert '・普通・' in hl.format_horse(data, TODAY)
 
 
 # ====================================================

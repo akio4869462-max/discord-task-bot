@@ -176,7 +176,8 @@ def test_cancelling_refunds_the_fee():
 # ====================================================
 # 誕生
 # ====================================================
-def test_foal_is_born_from_the_plan_at_retirement():
+def test_foal_is_born_from_the_plan_at_retirement(monkeypatch):
+    monkeypatch.setattr(hl, 'is_nick', lambda a, b: False)   # 系統は馬名から決まるので、ここでは相性を切る
     data = stable_with_stallion()
     sire = data['current']
     sire_name, sire_growth = sire['name'], dict(sire['growth'])
