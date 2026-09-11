@@ -1284,39 +1284,105 @@
   // ====================================================
   // 実況
   // ====================================================
+  // ⭕ 文言は「場面の骨格」＋「4秒前と比べて起きたこと」で組む。4秒前との比較は時刻から
+  //    決まるので、スクラブしても同じ文になる。1.5秒ごとに区切って文が細かく揺れないようにする。
+  const CALL_TICK = 1.5;
+  const LOOKBACK = 4.0;
+
+  function ranksAt(time) {
+    const order = HORSES.map(function (h, i) { return { i: i, d: distanceAt(h, time), h: h }; })
+      .sort(function (a, b) {
+        const da = time >= a.h.time, db = time >= b.h.time;
+        if (da && db) return a.h.finish - b.h.finish;
+        if (da !== db) return da ? -1 : 1;
+        return b.d - a.d;
+      });
+    const rank = {};
+    order.forEach(function (o, r) { rank[o.i] = r + 1; });
+    return { rank: rank, order: order };
+  }
+
+  function sideWord(i, time) {
+    const f = laneFAt(i, time);
+    return f > 0.55 ? '外から' : (f < 0.25 ? '内から' : '馬群を割って');
+  }
+
+  /** 4秒前と比べて起きたことを1つ返す（無ければ空文字）。 */
+  function eventText(time, ranked, lead) {
+    if (time < LOOKBACK + 1) return '';
+    const now = ranksAt(time), before = ranksAt(time - LOOKBACK);
+    const prog = lead / DISTANCE;
+    const mine = HORSES.filter(function (h) { return h.is_player; })[0];
+    const mi = mine ? HORSES.indexOf(mine) : -1;
+
+    // 先頭が変わった
+    const leadNow = now.order[0], leadBefore = before.order[0];
+    if (leadNow.i !== leadBefore.i && prog > 0.15 && time < leadNow.h.time) {
+      return leadNow.h.name + 'が' + sideWord(leadNow.i, time) + '先頭に立ちました。';
+    }
+    // 大きく上がった馬（自分の馬を優先）
+    let best = null;
+    const need = prog > 0.7 ? 2 : 3;               // 直線は動きが速いので2つ上がれば拾う
+    HORSES.forEach(function (h, i) {
+      if (time >= h.time) return;
+      const gain = before.rank[i] - now.rank[i];
+      if (gain >= need && (!best || gain > best.gain || (i === mi && gain >= best.gain))) best = { i: i, h: h, gain: gain };
+    });
+    if (best) {
+      const who = best.i === mi ? 'マイホース' : best.h.name;
+      return who + 'が' + sideWord(best.i, time) + '上がってきました。' + now.rank[best.i] + '番手。';
+    }
+    // 自分の馬が詰まっている／下がっている
+    if (mi >= 0 && time < mine.time) {
+      const drop = now.rank[mi] - before.rank[mi];
+      if (drop >= 3) return 'マイホースは' + (laneFAt(mi, time) < 0.3 ? '内で詰まって' : '') + '後退、' + now.rank[mi] + '番手。';
+    }
+    // 直線で並んだ
+    if (prog > 0.8 && now.order.length > 1 && now.order[0].d - now.order[1].d < 1.0 && time < now.order[0].h.time) {
+      return now.order[0].h.name + 'と' + now.order[1].h.name + 'が並んだ！';
+    }
+    return '';
+  }
+
   function commentary(t, ranked, lead) {
+    const tick = Math.floor(t / CALL_TICK) * CALL_TICK;        // 1.5秒ごとに文を固定する
     const prog = lead / DISTANCE;
     const top = ranked[0].h, second = ranked[1] ? ranked[1].h : null;
     const mine = ranked.filter(function (r) { return r.h.is_player; })[0];
     const minePos = mine ? mine.h.currentPos : null;
     const remain = Math.round(DISTANCE - lead);
+    const winner = WINNER[0];
 
     if (t <= 0) return 'ゲートが開くのを待っています。';
-    if (prog < 0.12) return 'スタートしました。' + top.name + 'が先手を取りました。';
-    if (prog < 0.45) {
-      let s = top.name + 'が先頭、' + (second ? second.name + 'が続きます。' : '');
-      s += PACE_LABEL + 'の流れ。';
-      if (minePos) s += 'マイホースは' + minePos + '番手。';
+    if (prog < 0.12) {
+      const late = HORSES.filter(function (h) { return h.trouble; });
+      let s = 'スタートしました。' + top.name + 'が先手を取りました。';
+      if (late.length) s += late.map(function (h) { return h.name; }).join('、') + 'は不利がありました。';
       return s;
     }
-    if (prog < 0.72) {
-      return '残り' + remain + 'm、' + top.name + 'が先頭のまま3コーナーを回ります。'
-        + (minePos ? 'マイホースは' + minePos + '番手から進出の構え。' : '');
+    if (t >= winner.time) {
+      if (t < MAX_TIME) {
+        return 'ゴール！ ' + winner.name + 'が1着。'
+          + (WINNER[1] ? WINNER[1].name + 'が' + marginLabel(WINNER[1].margin) + 'の2着。' : '');
+      }
+      return winner.name + 'が優勝しました。勝ちタイム ' + mmss(winner.time) + '。';
     }
-    if (prog < 0.93) {
-      return '直線に入りました。' + top.name + 'が抜け出しにかかる。'
-        + (second ? second.name + 'が食い下がります。' : '');
+
+    const ev = eventText(tick, ranked, lead);
+    let base;
+    if (prog < 0.45) {
+      base = top.name + 'が先頭、' + (second ? second.name + 'が続きます。' : '') + PACE_LABEL + 'の流れ。';
+      if (!ev && minePos) base += 'マイホースは' + minePos + '番手' + (mine ? (laneFAt(HORSES.indexOf(mine.h), tick) < 0.3 ? '、内で脚をためています。' : '、外めを追走。') : '。');
+    } else if (prog < 0.72) {
+      base = '残り' + remain + 'm、' + top.name + 'が先頭のまま3コーナーを回ります。';
+      if (!ev && minePos) base += 'マイホースは' + minePos + '番手から進出の構え。';
+    } else if (prog < 0.93) {
+      base = '直線に入りました。' + top.name + 'が抜け出しにかかる。';
+      if (!ev && second) base += second.name + 'が食い下がります。';
+    } else {
+      base = 'ゴール前、' + top.name + 'が先頭。' + (second ? second.name + 'との差はわずか。' : '') + (CLOSE_FINISH ? '接戦です！' : '');
     }
-    const winner = WINNER[0];
-    if (t < winner.time) {
-      return 'ゴール前、' + top.name + 'が先頭。' + (second ? second.name + 'との差はわずか。' : '')
-        + (CLOSE_FINISH ? '接戦です！' : '');
-    }
-    if (t < MAX_TIME) {
-      return 'ゴール！ ' + winner.name + 'が1着。'
-        + (WINNER[1] ? WINNER[1].name + 'が' + marginLabel(WINNER[1].margin) + 'の2着。' : '');
-    }
-    return winner.name + 'が優勝しました。勝ちタイム ' + mmss(winner.time) + '。';
+    return ev ? base + ev : base;
   }
 
   /** 秒の着差を競馬の表記にする（1馬身≒0.17秒）。 */
