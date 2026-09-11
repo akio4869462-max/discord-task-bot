@@ -672,71 +672,113 @@
   function drawHorseRear(p, h, phase, lateralOffset) {
     const k = p.k;
     const S = k / 30;                         // 体高1.6m前後に相当する大きさ
-    const bob = Math.sin(phase * 2) * 0.9 * S;
-    const x = p.x, y = p.y + bob;
     const coat = h.coat;
     const skew = Math.max(-1, Math.min(1, lateralOffset / 12));   // 中央から外れるほど斜めに見える
-
-    // 後脚。左右で位相をずらす。
-    ctx.strokeStyle = coat.mane;
+    // ⭕ 襲歩（ギャロップ）は1完歩に「後脚で蹴る→伸びる→前脚で着く→集める」がある。
+    //    胴の上下は完歩に1回、脚は左右で位相をずらす。
+    const gallop = Math.sin(phase);
+    const bob = (0.5 - 0.5 * Math.cos(phase)) * 1.6 * S;          // 伸びたとき高く、集めたとき低い
+    const x = p.x, y = p.y + bob;
     ctx.lineCap = 'round';
-    ctx.lineWidth = 3.4 * S;
-    [-1, 1].forEach(function (side, idx) {
-      const a = phase + idx * Math.PI;
-      const swing = Math.sin(a);
-      const hipX = x + side * 5.5 * S, hipY = y - 15 * S;
-      const kneeX = hipX + side * 1.5 * S + skew * 2 * S, kneeY = hipY + 8 * S;
-      const hoofX = kneeX + swing * 4 * S, hoofY = y - Math.max(0, swing) * 5 * S;
-      ctx.beginPath();
-      ctx.moveTo(hipX, hipY); ctx.lineTo(kneeX, kneeY); ctx.lineTo(hoofX, hoofY);
-      ctx.stroke();
-    });
 
-    // 胴（後ろから見たトモ）
-    ctx.fillStyle = coat.body;
-    ctx.beginPath();
-    ctx.ellipse(x + skew * 2 * S, y - 20 * S, 8.5 * S, 11 * S, skew * 0.12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = coat.dark;                       // 尻の陰影
-    ctx.beginPath();
-    ctx.ellipse(x + skew * 2 * S - 3.4 * S, y - 20 * S, 4.2 * S, 10 * S, skew * 0.12, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 前が少し見える（斜めのとき）
-    if (Math.abs(skew) > 0.15) {
+    // ---- 首と頭（一番奥）。斜めのときだけ体の横に見える。真後ろでは騎手の陰 ----
+    if (Math.abs(skew) > 0.12) {
+      const neckBaseX = x + skew * 9 * S, neckBaseY = y - 30 * S;
+      const headX = neckBaseX + skew * 9 * S, headY = neckBaseY - 4 * S + gallop * 1.5 * S;
+      ctx.strokeStyle = coat.dark;
+      ctx.lineWidth = 5.5 * S;
+      ctx.beginPath(); ctx.moveTo(neckBaseX, neckBaseY); ctx.lineTo(headX, headY); ctx.stroke();
       ctx.fillStyle = coat.body;
+      ctx.beginPath(); ctx.ellipse(headX + skew * 2 * S, headY - 1.5 * S, 3.2 * S, 4.2 * S, skew * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = coat.dark;                                       // 耳
       ctx.beginPath();
-      ctx.ellipse(x + skew * 12 * S, y - 22 * S, 5 * S, 8.5 * S, 0, 0, Math.PI * 2);
+      ctx.moveTo(headX + skew * 2 * S, headY - 5 * S);
+      ctx.lineTo(headX + skew * 2 * S - 1.4 * S, headY - 8 * S);
+      ctx.lineTo(headX + skew * 2 * S + 1.2 * S, headY - 6.5 * S);
       ctx.fill();
     }
 
-    // 尾
+    // ---- 前脚（胴の奥）。後脚と半周ずれて動く ----
+    ctx.strokeStyle = coat.dark;
+    ctx.lineWidth = 2.6 * S;
+    [-1, 1].forEach(function (side, idx) {
+      const a = phase + Math.PI + idx * 0.9;
+      const swing = Math.sin(a);
+      const shX = x + side * 4.2 * S + skew * 7 * S, shY = y - 22 * S;
+      const kneeX = shX + swing * 1.5 * S, kneeY = shY + 7 * S - Math.max(0, swing) * 2 * S;
+      const hoofX = kneeX + swing * 2.5 * S, hoofY = y - 1.5 * S - Math.max(0, -swing) * 4.5 * S;
+      ctx.beginPath(); ctx.moveTo(shX, shY); ctx.lineTo(kneeX, kneeY); ctx.lineTo(hoofX, hoofY); ctx.stroke();
+    });
+
+    // ---- 胴（肩から腰へ）。奥の肩を先に、手前のトモをあとに ----
+    ctx.fillStyle = coat.body;
+    ctx.beginPath(); ctx.ellipse(x + skew * 7 * S, y - 25 * S, 7 * S, 8.5 * S, skew * 0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + skew * 2 * S, y - 20 * S, 8.5 * S, 11 * S, skew * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = coat.dark;                                         // 尻の陰影
+    ctx.beginPath(); ctx.ellipse(x + skew * 2 * S - 3.4 * S, y - 20 * S, 4.2 * S, 10 * S, skew * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.18)';                               // 背線
+    ctx.lineWidth = 1.2 * S;
+    ctx.beginPath(); ctx.moveTo(x + skew * 2 * S, y - 31 * S); ctx.lineTo(x + skew * 2 * S, y - 12 * S); ctx.stroke();
+
+    // ---- 後脚（手前）。蹴り出しで後ろへ伸び、集めで腹の下へ ----
+    [-1, 1].forEach(function (side, idx) {
+      const a = phase + idx * 0.7;
+      const swing = Math.sin(a);
+      const hipX = x + side * 5.5 * S + skew * 1.5 * S, hipY = y - 15 * S;
+      const hockX = hipX + side * 1.2 * S + swing * 1.5 * S, hockY = hipY + 7.5 * S - Math.max(0, -swing) * 3 * S;
+      const hoofX = hockX + side * 0.6 * S + swing * 3.5 * S, hoofY = y - Math.max(0, swing) * 6 * S;
+      ctx.strokeStyle = coat.mane;
+      ctx.lineWidth = 3.6 * S;
+      ctx.beginPath(); ctx.moveTo(hipX, hipY); ctx.lineTo(hockX, hockY); ctx.lineTo(hoofX, hoofY); ctx.stroke();
+      ctx.fillStyle = '#1a120c';                                       // 蹄
+      ctx.beginPath(); ctx.ellipse(hoofX, hoofY, 1.6 * S, 1.0 * S, 0, 0, Math.PI * 2); ctx.fill();
+      // ⭕ ダートは着地のたびに砂が舞う。手前へ飛ぶので少し大きく、薄く
+      if (IS_DIRT && swing > 0.55) {
+        const alpha = 0.45 * (swing - 0.55) / 0.45;
+        ctx.fillStyle = 'rgba(214,190,150,' + alpha.toFixed(2) + ')';
+        for (let j = 0; j < 3; j++) {
+          const spread = (j - 1) * 2.2 * S + side * 1.5 * S;
+          ctx.beginPath();
+          ctx.ellipse(hoofX + spread, hoofY + 1.5 * S + j * 0.8 * S, (2.2 + j * 0.8) * S, (1.4 + j * 0.5) * S, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+
+    // ---- 尾。走ると後ろへ流れ、こちらへ向く ----
     ctx.strokeStyle = coat.mane;
-    ctx.lineWidth = 4.2 * S;
+    ctx.lineWidth = 4.4 * S;
     ctx.beginPath();
     ctx.moveTo(x + skew * 2 * S, y - 27 * S);
-    ctx.quadraticCurveTo(x + Math.sin(phase) * 3 * S, y - 16 * S, x + Math.sin(phase) * 5 * S, y - 6 * S);
+    ctx.quadraticCurveTo(x + Math.sin(phase) * 3 * S, y - 20 * S, x + Math.sin(phase) * 5 * S, y - 9 * S + gallop * 2 * S);
     ctx.stroke();
-
-    // 騎手（背中と勝負服）
-    ctx.fillStyle = h.color.bg;
-    ctx.beginPath();
-    ctx.ellipse(x + skew * 3 * S, y - 33 * S, 7.5 * S, 8 * S, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,.18)';
-    ctx.beginPath();
-    ctx.ellipse(x + skew * 3 * S - 2.5 * S, y - 33 * S, 3 * S, 7.5 * S, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = h.color.bg;                       // ヘルメット
-    ctx.beginPath();
-    ctx.arc(x + skew * 4 * S, y - 41 * S, 4.6 * S, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = h.color.bg;                     // 腕
     ctx.lineWidth = 2.6 * S;
     ctx.beginPath();
-    ctx.moveTo(x + skew * 3 * S - 5 * S, y - 33 * S);
-    ctx.lineTo(x + skew * 3 * S + 5 * S, y - 33 * S);
+    ctx.moveTo(x + skew * 2 * S, y - 26 * S);
+    ctx.quadraticCurveTo(x + Math.sin(phase + 0.8) * 4 * S, y - 19 * S, x + Math.sin(phase + 0.8) * 7 * S, y - 7 * S + gallop * 2 * S);
     ctx.stroke();
+
+    // ---- 騎手。前傾して背中を丸め、完歩に合わせて上体が上下する ----
+    const jx = x + skew * 4 * S, jy = y - 33 * S - bob * 0.35;
+    ctx.fillStyle = h.color.bg;                                        // 背中（勝負服）
+    ctx.beginPath(); ctx.ellipse(jx, jy, 7.2 * S, 7.5 * S, skew * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.2)';
+    ctx.beginPath(); ctx.ellipse(jx - 2.6 * S, jy, 3 * S, 7 * S, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f1e5d2';                                         // 白いパンツ
+    ctx.beginPath(); ctx.ellipse(jx, jy + 6 * S, 6.5 * S, 3.2 * S, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1b1b1b';                                       // 長靴
+    ctx.lineWidth = 2.4 * S;
+    ctx.beginPath(); ctx.moveTo(jx - 8 * S, jy + 3 * S); ctx.lineTo(jx - 9.5 * S, jy + 11 * S); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(jx + 8 * S, jy + 3 * S); ctx.lineTo(jx + 9.5 * S, jy + 11 * S); ctx.stroke();
+    ctx.strokeStyle = h.color.bg;                                      // 腕（手綱へ）
+    ctx.lineWidth = 2.6 * S;
+    ctx.beginPath(); ctx.moveTo(jx - 5 * S, jy - 1 * S); ctx.lineTo(jx - 7 * S + skew * 6 * S, jy - 7 * S); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(jx + 5 * S, jy - 1 * S); ctx.lineTo(jx + 7 * S + skew * 6 * S, jy - 7 * S); ctx.stroke();
+    ctx.fillStyle = h.color.bg;                                        // ヘルメット
+    ctx.beginPath(); ctx.arc(jx + skew * 1.5 * S, jy - 8.5 * S, 4.4 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.55)';
+    ctx.lineWidth = 1.1 * S;
+    ctx.beginPath(); ctx.arc(jx + skew * 1.5 * S, jy - 8.5 * S, 4.4 * S, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
   }
 
   /** 馬番のタグ。⭕ 馬体に番号を描くと奥では読めないので頭上に出す。 */
