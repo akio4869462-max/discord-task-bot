@@ -24,6 +24,12 @@ class ExamMenuView(View):
     async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
 
+    # ⭕ スラッシュコマンド（/exam reset）はグローバル同期の反映に最長1時間かかる。
+    #    ボタンは同期が要らないので、同じ操作をこちらにも置く。
+    @discord.ui.button(label="🧹 記録をリセット", style=discord.ButtonStyle.secondary, row=1)
+    async def reset_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await ask_reset(interaction)
+
 
 class ExamFieldSelectView(View):
     """演習記録の1ステップ目：分野をプルダウンで選ばせるView
@@ -138,11 +144,15 @@ class ExamResetView(View):
         await interaction.response.edit_message(content="リセットはやめました。", view=None)
 
 
-@exam_group.command(name="reset", description="演習記録を消して最初からにします（消す前の記録は退避）")
-async def exam_reset_command(interaction: discord.Interaction):
+async def ask_reset(interaction):
     count = len(exam_logic.load_exam_data().get('sessions', []))
     await interaction.response.send_message(
         f"演習記録 {count}件 を消して最初からにします。よろしいですか？", view=ExamResetView(), ephemeral=True)
+
+
+@exam_group.command(name="reset", description="演習記録を消して最初からにします（消す前の記録は退避）")
+async def exam_reset_command(interaction: discord.Interaction):
+    await ask_reset(interaction)
 
 
 tree.add_command(exam_group)
