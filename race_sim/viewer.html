@@ -410,6 +410,91 @@
     return INNER * (TRACK_W / 2 - 1.6) * (1 - 2 * f);
   }
 
+  // ====================================================
+  // 横位置（馬群の動き）
+  // ====================================================
+  // ⭕ エンジンは200m区間のタイムしか出さないので、横の動きはここで合成する。
+  //    ルールは1つ：「前が空いていれば内へ寄り、詰まっていれば外へ持ち出す」。
+  //    先頭から順に、前方の窓（少し後ろ〜数m前）に馬がいない一番内側の位置を狙う。
+  //    順位が上がる馬は詰まった内を避けて外から来るので、通過順の変化がそのまま
+  //    「内で詰まる」「外を回す」「抜け出す」に見える。
+  //    横移動には速度の上限があるので、狙いが変わっても馬群は滑らかに動く。
+  const LAT_STEP = 0.1;                       // 横位置を前計算する時間刻み[s]
+  const LANE_W = 1.5;                         // 馬1頭ぶんの横幅[m]。これ未満に並ぶと接触
+  // ⭕ 前方の窓。5mにすると縦に連なった馬が互いを塞いで内へ戻れず、後方の馬が外に取り残された
+  const BLOCK_AHEAD = 3.0, BLOCK_BEHIND = 1.5; // この範囲に馬がいると詰まっている（馬体2.5m＋0.5m）
+  const RATE_IN = 0.6, RATE_OUT = 2.2;        // 内へ寄る／外へ出る横速度[m/s]
+  const GATE_HOLD_M = 150;                    // スタートからこの距離までは枠なりに走る
+  const RAIL_MARGIN = 1.6;                    // ラチからの最小距離[m]
+  const HALF = TRACK_W / 2 - RAIL_MARGIN;
+  // 内側を0、外側を1とした位置 f と、走路上の横座標 lat の相互変換
+  function fToLat(f) { return INNER * HALF * (1 - 2 * f); }
+  function latToF(lat) { return (1 - lat / (INNER * HALF)) / 2; }
+
+  const LAT_TABLE = (function () {
+    const steps = Math.ceil(MAX_TIME / LAT_STEP) + 2;
+    const table = HORSES.map(function () { return new Float32Array(steps); });
+    const f = HORSES.map(function (h) { return N > 1 ? h.lane / (N - 1) : 0.5; });
+    const maxF = 1, minF = 0;
+
+    for (let s = 0; s < steps; s++) {
+      const t = s * LAT_STEP;
+      const d = HORSES.map(function (h) { return distanceAt(h, t); });
+      const lead = Math.max.apply(null, d);
+      const order = HORSES.map(function (_, i) { return i; }).sort(function (a, b) { return d[b] - d[a]; });
+      const placed = [];                      // {d, f} すでに位置を決めた（前を走る）馬
+
+      order.forEach(function (i) {
+        let target = f[i];
+        let blocked = false;                 // 詰まって避ける動きは速く、空いていて寄る動きは遅い
+        if (lead >= GATE_HOLD_M && d[i] < DISTANCE) {
+          // 前方の窓に馬がいない、一番内側の位置を探す
+          const blockers = placed.filter(function (p) {
+            const gap = p.d - d[i];
+            return gap > -BLOCK_BEHIND && gap < BLOCK_AHEAD;
+          });
+          const free = function (cand) {
+            return blockers.every(function (p) { return Math.abs(fToLat(p.f) - fToLat(cand)) >= LANE_W; });
+          };
+          // まず今の位置が空いていれば、そこから内へ寄れるだけ寄る
+          blocked = !free(f[i]);
+          if (!blocked) {
+            target = f[i];
+            for (let cand = f[i]; cand >= minF; cand -= 0.02) {
+              if (free(cand)) target = cand; else break;
+            }
+          } else {
+            // 詰まっている：内外の近いほうの空きへ。同じ距離なら内を取る
+            // ⭕ 外だけを探すと、縦に連なった馬群がひたすら外へ階段状に膨らんだ
+            target = f[i];
+            let inner = null, outer = null;
+            for (let cand = f[i]; cand >= minF; cand -= 0.02) { if (free(cand)) { inner = cand; break; } }
+            for (let cand = f[i]; cand <= maxF; cand += 0.02) { if (free(cand)) { outer = cand; break; } }
+            if (inner !== null && (outer === null || f[i] - inner <= outer - f[i])) target = inner;
+            else if (outer !== null) target = outer;
+          }
+        }
+        const rate = (blocked ? RATE_OUT : RATE_IN) * LAT_STEP / (2 * HALF);   // f の単位に換算
+        if (Math.abs(target - f[i]) <= rate) f[i] = target;
+        else f[i] += target > f[i] ? rate : -rate;
+        f[i] = Math.max(minF, Math.min(maxF, f[i]));
+        if (d[i] < DISTANCE) placed.push({ d: d[i], f: f[i] });   // ゴールした馬は前を塞がない
+        table[i][s] = f[i];
+      });
+    }
+    return table;
+  })();
+
+  /** その時刻の横位置 f（0=内ラチ側、1=外ラチ側）。刻みの間は線形補間。 */
+  function laneFAt(i, t) {
+    const row = LAT_TABLE[i];
+    const x = Math.max(0, t / LAT_STEP);
+    const s = Math.min(row.length - 2, Math.floor(x));
+    const a = row[s], b = row[s + 1];
+    return a + (b - a) * (x - s);
+  }
+  function latAt(i, t) { return fToLat(laneFAt(i, t)); }
+
   // ---- 空・遠景 ----
   function drawSky(camD) {
     const sky = ctx.createLinearGradient(0, 0, 0, HORIZON_Y + 30);
@@ -727,7 +812,7 @@
 
     // 奥（遠い＝先頭）から描き、手前の馬が重なるようにする
     const drawable = HORSES.map(function (h, i) {
-      return { h: h, d: positions[i], lat: laneLat(h.lane) };
+      return { h: h, d: positions[i], lat: latAt(i, t) };
     }).sort(function (a, b) { return b.d - a.d; });
 
     drawable.forEach(function (o) {
@@ -787,9 +872,13 @@
       ctx.fillRect(gx - 3, top - 5, 6, bottom - top + 10);
     }
 
-    HORSES.forEach(function (h, i) {
+    // ⭕ 上から見た図。縦は実際の横位置（下が内ラチ）なので、馬群の形がそのまま出る
+    const drawOrder = HORSES.map(function (h, i) { return i; })
+      .sort(function (a, b) { return laneFAt(a, t) - laneFAt(b, t); });
+    drawOrder.forEach(function (i) {
+      const h = HORSES[i];
       const x = (positions[i] - camStart) / mPerPx;
-      const y = top + laneH * (i + 0.5);
+      const y = bottom - 14 - (bottom - top - 28) * laneFAt(i, t);
       const r = Math.min(16, laneH / 2 - 2);
       if (h.is_player) {
         ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2);
