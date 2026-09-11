@@ -77,7 +77,7 @@ class StableMenuView(View):
     """厩舎のサブメニュー。調教の記録・ステータス・出走登録をまとめる。"""
 
     def __init__(self):
-        super().__init__(timeout=120)
+        super().__init__(timeout=600)      # ⭕ 2分だと馬を見比べている間に切れる
         data = horse_logic.load_stable()
         horse = data['current']
         if horse.get('entry'):
@@ -169,10 +169,19 @@ class HorseSelect(Select):
         super().__init__(placeholder="見る馬を切り替え", options=options, row=3)
 
     async def callback(self, interaction: discord.Interaction):
-        data = horse_logic.load_stable()
-        horse = horse_logic.select_horse(data, self.values[0])
-        await interaction.response.edit_message(
-            content=f"🐎 **{horse['name']}** を選びました。", view=StableMenuView())
+        # ⭕ 失敗すると Discord は「インタラクションに失敗しました」としか出さない。
+        #    何が起きたか分かるよう、例外は本文にして返す。
+        try:
+            data = horse_logic.load_stable()
+            horse = horse_logic.select_horse(data, self.values[0])
+            await interaction.response.edit_message(
+                content=f"🐎 **{horse['name']}** を選びました。", view=StableMenuView())
+        except Exception as e:
+            print(f"❌ [馬の切替] {type(e).__name__}: {e}")
+            if interaction.response.is_done():
+                await interaction.followup.send(f"⚠️ 切替に失敗しました: {type(e).__name__}: {e}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"⚠️ 切替に失敗しました: {type(e).__name__}: {e}", ephemeral=True)
 
 
 # ====================================================
@@ -772,6 +781,26 @@ async def entry_command(interaction: discord.Interaction):
 @tree.command(name="breed", description="次の世代の配合を予約します（15戦目から）")
 async def breed_command(interaction: discord.Interaction):
     await show_breeding(interaction)
+
+
+@tree.command(name="horse", description="見る馬を切り替えます（番号は /stable の「他の馬」の順）")
+@discord.app_commands.describe(number="1〜3", main="Trueならその馬を主戦にする")
+async def horse_command(interaction: discord.Interaction, number: int, main: bool = False):
+    data = horse_logic.load_stable()
+    if not 1 <= number <= len(data['horses']):
+        listing = "\n".join(
+            f"{i}. {h['name']}（{h['class']}・{'主戦' if horse_logic.is_main(data, h) else '併せ馬'}）"
+            for i, h in enumerate(data['horses'], start=1))
+        await interaction.response.send_message(
+            listing + f"\n1〜{len(data['horses'])} で指定してください。", ephemeral=True)
+        return
+    horse = data['horses'][number - 1]
+    horse_logic.select_horse(data, horse['id'])
+    text = f"🐎 **{horse['name']}** を選びました。厩舎メニューの操作はこの馬に対して行います。"
+    if main:
+        horse_logic.set_main(data, horse['id'])
+        text += "\n⭐ 主戦にしました。"
+    await interaction.response.send_message(text, ephemeral=True)
 
 
 @tree.command(name="pedigree", description="現役馬の血統表を表示します")
