@@ -108,6 +108,22 @@
   }
   .live .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .live .gp { font-family: "Roboto Mono", monospace; font-size: 11px; opacity: .8; }
+  /* ゴール後の確定パネル */
+  .finish {
+    position: absolute; right: 2.4%; top: 14%; width: min(40%, 330px);
+    background: rgba(12,20,15,.82); border-left: 3px solid #ffd45e;
+    padding: 8px 12px 10px; border-radius: 2px;
+  }
+  .finish-head {
+    font-family: "Roboto Mono", monospace; font-size: clamp(10px, 1.2vw, 13px);
+    letter-spacing: .14em; color: #ffd45e; margin-bottom: 4px;
+  }
+  .finish table { width: 100%; border-collapse: collapse; font-size: clamp(9px, 1.15vw, 13px); }
+  .finish td { padding: 2px 4px; border: none; white-space: nowrap; color: #fff; }
+  .finish td.r { font-family: "Roboto Mono", monospace; width: 2.2em; text-align: right; opacity: .8; }
+  .finish td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 11em; }
+  .finish td.tm { font-family: "Roboto Mono", monospace; text-align: right; font-variant-numeric: tabular-nums; }
+  .finish tr.mine td { color: #ffe08a; }
   .call {
     position: absolute; left: 2.4%; right: 2.4%; bottom: 4%;
     background: rgba(12,20,15,.72); padding: 8px 14px; border-radius: 2px;
@@ -186,6 +202,10 @@
       </div>
       <div class="pace-chip" id="pace-chip"></div>
       <ol class="live" id="live"></ol>
+      <div class="finish" id="finish" hidden>
+        <div class="finish-head">確定</div>
+        <table id="finish-body"></table>
+      </div>
       <div class="call" id="call"></div>
     </div>
   </div>
@@ -289,6 +309,12 @@
     h.lane = i;                         // 走路の内から外への位置
   });
   const MAX_TIME = Math.max.apply(null, HORSES.map(function (h) { return h.time; }));
+  // ⭕ ゴール後も馬は止まらない。全馬がゴールしたあと数秒は流して減速する姿を見せる。
+  const RUNOUT_S = 4.0;
+  const END_TIME = MAX_TIME + RUNOUT_S;
+  const WINNER = DATA.horses.slice().sort(function (a, b) { return a.finish - b.finish; });
+  // 2着との差がこれ以下なら接戦。ゴール前をスローで見せる
+  const CLOSE_FINISH = WINNER.length > 1 && WINNER[1].margin <= 0.10;   // 1/2馬身以内
   const PACE_LABEL = DATA.pace > 0.15 ? 'ハイペース' : (DATA.pace < -0.15 ? 'スローペース' : '平均ペース');
 
   // ====================================================
@@ -340,12 +366,20 @@
 
   /** その時刻に何メートル地点にいるか。区間の中は等速とみなして補間する。 */
   function distanceAt(h, t) {
-    if (t >= h.time) return DISTANCE;
+    if (t >= h.time) return DISTANCE + runout(h, t - h.time);
     let i = 0;
     while (i < h.cum.length && h.cum[i] <= t) i++;
     const prev = i === 0 ? 0 : h.cum[i - 1];
     const split = h.splits[i];
     return Math.min(DISTANCE, (i + (split > 0 ? (t - prev) / split : 0)) * h.sectionLen);
+  }
+
+  /** ゴール後に流した距離。最後の区間の速度から、8秒かけて3割まで減速する。 */
+  function runout(h, tau) {
+    const v0 = h.sectionLen / Math.max(0.1, h.splits[h.splits.length - 1]);
+    const brake = 5.6;                        // ここで速度が3割になる
+    if (tau <= brake) return v0 * (tau - tau * tau / 16);
+    return v0 * (brake - brake * brake / 16) + 0.3 * v0 * (tau - brake);
   }
 
   // ====================================================
@@ -360,7 +394,7 @@
 
   const FOCAL = 1420;          // 焦点距離。大きいほど望遠になる
   const CAM_HEIGHT = 3.4;      // カメラの高さ(m)
-  const CAM_BACK = 14;         // 最後方の馬の何m後ろから見るか
+  const CAM_BACK = 20;         // 最後方の馬の何m後ろから見るか。14だと手前の馬が巨大に映った
   // ⭕ カメラを走路の内側へ寄せ、馬群を画面の右半分に置く。中央に置くと
   //    馬が左右に広がってしまい、左の隊列オーバーレイと重なって両方見づらくなる。
   const CAM_LAT = -7;
@@ -432,7 +466,7 @@
   function latToF(lat) { return (1 - lat / (INNER * HALF)) / 2; }
 
   const LAT_TABLE = (function () {
-    const steps = Math.ceil(MAX_TIME / LAT_STEP) + 2;
+    const steps = Math.ceil(END_TIME / LAT_STEP) + 2;
     const table = HORSES.map(function () { return new Float32Array(steps); });
     const f = HORSES.map(function (h) { return N > 1 ? h.lane / (N - 1) : 0.5; });
     const maxF = 1, minF = 0;
@@ -927,9 +961,31 @@
       return '直線に入りました。' + top.name + 'が抜け出しにかかる。'
         + (second ? second.name + 'が食い下がります。' : '');
     }
-    if (t < MAX_TIME) return 'ゴール前、' + top.name + 'が先頭。' + (second ? second.name + 'との差はわずか。' : '');
-    const winner = DATA.horses[0];
+    const winner = WINNER[0];
+    if (t < winner.time) {
+      return 'ゴール前、' + top.name + 'が先頭。' + (second ? second.name + 'との差はわずか。' : '')
+        + (CLOSE_FINISH ? '接戦です！' : '');
+    }
+    if (t < MAX_TIME) {
+      return 'ゴール！ ' + winner.name + 'が1着。'
+        + (WINNER[1] ? WINNER[1].name + 'が' + marginLabel(WINNER[1].margin) + 'の2着。' : '');
+    }
     return winner.name + 'が優勝しました。勝ちタイム ' + mmss(winner.time) + '。';
+  }
+
+  /** 秒の着差を競馬の表記にする（1馬身≒0.17秒）。 */
+  function marginLabel(sec) {
+    if (sec <= 0) return '同着';
+    if (sec < 0.03) return 'ハナ';
+    if (sec < 0.06) return 'アタマ';
+    if (sec < 0.1) return 'クビ';
+    const lengths = sec / 0.17;
+    if (lengths >= 10) return '大差';
+    const q = Math.round(lengths * 4) / 4;
+    const whole = Math.floor(q), frac = q - whole;
+    const fracText = frac === 0.25 ? '1/4' : frac === 0.5 ? '1/2' : frac === 0.75 ? '3/4' : '';
+    if (whole === 0) return fracText + '馬身';
+    return whole + (fracText ? ' ' + fracText : '') + '馬身';
   }
 
   // ====================================================
@@ -941,8 +997,13 @@
     const positions = HORSES.map(function (h) { return distanceAt(h, t); });
     const lead = Math.max.apply(null, positions);
 
-    const ranked = HORSES.map(function (h, i) { return { h: h, d: positions[i] }; })
-      .sort(function (a, b) { return b.d - a.d; });
+    // ⭕ ゴールした馬は着順で並べる。流しの距離で順位が入れ替わってはいけない
+    const ranked = HORSES.map(function (h, i) { return { h: h, d: positions[i], done: t >= h.time }; })
+      .sort(function (a, b) {
+        if (a.done && b.done) return a.h.finish - b.h.finish;
+        if (a.done !== b.done) return a.done ? -1 : 1;
+        return b.d - a.d;
+      });
     ranked.forEach(function (r, i) { r.h.currentPos = i + 1; });
 
     ctx.clearRect(0, 0, W, H);
@@ -954,7 +1015,28 @@
     document.getElementById('clock-big').textContent = t.toFixed(1);
     document.getElementById('call').textContent = commentary(t, ranked, lead);
     updateLive(ranked, t);
+    updateFinishPanel(t);
     document.getElementById('clock').textContent = t.toFixed(1) + 's';
+  }
+
+  /** 上位3頭がゴールしたら、確定パネルを出す（自分の馬も、ゴールしていれば足す）。 */
+  const finishEl = document.getElementById('finish');
+  const finishBody = document.getElementById('finish-body');
+  function updateFinishPanel(t) {
+    const third = WINNER[Math.min(2, WINNER.length - 1)];
+    if (t < third.time) { finishEl.hidden = true; return; }
+    const rows = WINNER.slice(0, 3);
+    const mine = WINNER.filter(function (h) { return h.is_player; })[0];
+    if (mine && rows.indexOf(mine) === -1 && t >= mine.time) rows.push(mine);
+    finishBody.innerHTML = rows.map(function (h) {
+      const src = HORSES.filter(function (x) { return x.no === h.no; })[0];
+      return '<tr class="' + (h.is_player ? 'mine' : '') + '">'
+        + '<td class="r">' + h.finish + '着</td>'
+        + '<td><span class="chip" style="background:' + src.color.bg + ';color:' + src.color.fg + '">' + h.no + '</span></td>'
+        + '<td class="nm">' + h.name + '</td>'
+        + '<td class="tm">' + (h.finish === 1 ? mmss(h.time) : marginLabel(h.margin)) + '</td></tr>';
+    }).join('');
+    finishEl.hidden = false;
   }
 
   const liveEl = document.getElementById('live');
@@ -967,8 +1049,8 @@
     liveEl.innerHTML = shown.map(function (r) {
       const h = r.h;
       const behind = leadD - r.d;
-      const gap = t >= MAX_TIME
-        ? (h.margin === 0 ? '—' : '+' + h.margin.toFixed(1))
+      const gap = r.done
+        ? (h.finish === 1 ? '1着' : marginLabel(h.margin))
         : (behind < 0.4 ? '先頭' : '-' + behind.toFixed(1) + 'm');
       return '<li class="' + (h.is_player ? 'mine' : '') + '">'
         + '<span class="rank">' + h.currentPos + '</span>'
@@ -1029,7 +1111,7 @@
 
   function setPlaying(on) {
     playing = on;
-    playBtn.textContent = on ? '⏸ 一時停止' : (t >= MAX_TIME ? '▶ もう一度' : '▶ スタート');
+    playBtn.textContent = on ? '⏸ 一時停止' : (t >= END_TIME ? '▶ もう一度' : '▶ スタート');
     if (on) { last = performance.now(); requestAnimationFrame(step); }
   }
 
@@ -1037,15 +1119,19 @@
     if (!playing) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    t += dt * speed;
-    if (t >= MAX_TIME) { t = MAX_TIME; setPlaying(false); reveal(); }
-    scrub.value = String(Math.round(t / MAX_TIME * 1000));
+    // ⭕ 接戦なら、先頭がゴール前80mに入ったところからスローにする（等速のときだけ）
+    const lead = Math.max.apply(null, HORSES.map(function (h) { return distanceAt(h, t); }));
+    const slow = CLOSE_FINISH && speed === 1 && lead >= DISTANCE - 80 && t < WINNER[1].time + 0.3;
+    t += dt * speed * (slow ? 0.3 : 1);
+    if (t >= MAX_TIME) reveal();
+    if (t >= END_TIME) { t = END_TIME; setPlaying(false); }
+    scrub.value = String(Math.round(t / END_TIME * 1000));
     render(t);
     if (playing) requestAnimationFrame(step);
   }
 
   playBtn.addEventListener('click', function () {
-    if (t >= MAX_TIME) t = 0;
+    if (t >= END_TIME) t = 0;
     setPlaying(!playing);
   });
   document.getElementById('restart').addEventListener('click', function () {
@@ -1053,7 +1139,7 @@
   });
   scrub.addEventListener('input', function () {
     setPlaying(false);
-    t = Number(scrub.value) / 1000 * MAX_TIME;
+    t = Number(scrub.value) / 1000 * END_TIME;
     render(t);
   });
   function bindGroup(selector, apply) {
