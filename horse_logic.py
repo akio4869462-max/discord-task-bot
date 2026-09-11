@@ -187,6 +187,8 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
         'sex': sex or rng.choice(['牡', '牝']),
         'debut': today.isoformat(),
         'growth': growth or _new_growth(),
+        # 生まれたときに持っていた積み上げ（配合で受け継いだ分）。週の調教量から除くために持つ
+        'birth_minutes': total_minutes(growth) if growth else 0.0,
         'style': '差し',
         'aptitude': _random_aptitude(rng),
         'class': '未勝利',
@@ -450,11 +452,23 @@ def player_entry(horse, data=None, today=None):
     }
 
 
-def available_races(data=None, on=None):
-    """次の開催日に出走できるレースを返します。"""
+RACE_HOUR = 20              # 開催日にレースが走る時刻（main.py の夜の分岐と同じ）
+
+
+def available_races(data=None, on=None, now=None):
+    """次の開催日に出走できるレースを返します。
+
+    ⭕ 開催日の20:00を過ぎていたら、その日の番組はもう走っているので次の開催日を出す。
+       そうしないと当日の日付で登録され、次の開催日に「古いレース」として走ってしまう。
+    """
     data = data if data is not None else load_stable()
     horse = data['current']
-    day = race_calendar.next_race_day(on or datetime.now(JST).date())
+    if on is None:
+        now = now or datetime.now(JST)
+        on = now.date()
+        if race_calendar.is_race_day(on) and now.hour >= RACE_HOUR:
+            on += timedelta(days=1)
+    day = race_calendar.next_race_day(on)
     return day, race_calendar.offers(horse['class'], day, aptitude=horse['aptitude'])
 
 
@@ -541,6 +555,9 @@ def _apply_result(data, race, mine, today, field_size):
         else:
             events.append("🏆 G1制覇！")
 
+    if rec['starts'] == BREEDING_OPEN_STARTS:
+        events.append(f"🧬 {BREEDING_OPEN_STARTS}戦目。次の世代の配合を予約できるようになりました。"
+                      f"（残り{RETIRE_STARTS - rec['starts']}戦）")
     if rec['starts'] >= RETIRE_STARTS:
         events.append(retire(data, today))
     return events
@@ -557,7 +574,9 @@ def stud_value(horse):
     """
     rec = horse.get('record', {})
     bonus = 1.0 + 0.05 * rec.get('win', 0)
-    if horse.get('class') == 'G1' and rec.get('win', 0) >= 1:
+    # ⭕ 「G1クラスで勝ち≧1」だと、G1に上がった馬は必ず7勝しているので全員が該当する。
+    #    G1を勝った馬に限る。
+    if any(h.get('class') == 'G1' and h.get('finish') == 1 for h in horse.get('history', [])):
         bonus += 0.30
     return bonus
 
@@ -882,6 +901,10 @@ def format_race_day_notice(data=None, today=None):
              f" 調子: {CONDITION_LABELS.get(cond, '平常')}"
              f" ／ 脚質: {horse.get('style', '差し')}")
 
+    ok, _ = breeding_status(horse)
+    if ok:
+        state += f"\n🧬 配合を予約できます（残り{RETIRE_STARTS - horse['record']['starts']}戦）"
+
     if entry:
         # ⭕ run_entry() は登録の日付を見ないので、前回走り損なった登録は今夜そのまま走る。
         #    黙って古いレースを走らせると面食らうので、今日のものでなければそう言う。
@@ -924,11 +947,34 @@ def get_weekly_summary(data=None, today=None, save=True):
     week_minutes = minutes - snap.get('minutes', 0)
     week_starts = rec['starts'] - snap.get('starts', 0)
     week_wins = rec['win'] - snap.get('wins', 0)
+    races = list(horse['history'])
+
+    # ⭕ 週の途中で世代交代していると、スナップショットは前の馬のもの。そのまま引くと
+    #    「今週の調教: -38時間」になる。前の馬の残りぶんと新馬のぶんを足し合わせる。
+    changed = snap and snap.get('horse_id') not in (None, horse['id'])
+    if changed:
+        prev = next((h for h in data['retired'] if h['id'] == snap['horse_id']), None)
+        if prev:
+            week_minutes = ((total_minutes(prev['growth']) - snap.get('minutes', 0))
+                            + minutes - horse.get('birth_minutes', 0))
+            week_starts = (prev['record']['starts'] - snap.get('starts', 0)) + rec['starts']
+            week_wins = (prev['record']['win'] - snap.get('wins', 0)) + rec['win']
+            races = prev['history'][snap.get('starts', 0):] + races
+        else:
+            week_minutes = minutes - horse.get('birth_minutes', 0)
+            week_starts, week_wins = rec['starts'], rec['win']
+    else:
+        races = races[snap.get('starts', 0):]
 
     msg = "📅 **【週間サマリー】**\n"
-    msg += f"今週の調教: {week_minutes / 60:.1f}時間\n"
+    msg += f"今週の調教: {max(0.0, week_minutes) / 60:.1f}時間\n"
     if week_starts > 0:
         msg += f"今週の出走: {week_starts}戦{week_wins}勝\n"
+        for h in races[-week_starts:]:
+            msg += (f"　{h['date'][5:]} {h['race']} {h['course']}{h['surface']}{h['distance']}m"
+                    f" → **{h['finish']}着**/{h['field']}頭\n")
+    if changed:
+        msg += f"🎓 世代交代しました。\n"
     msg += f"🐎 {horse['name']}（{horse['class']}） 通算 {rec['starts']}戦{rec['win']}勝"
     msg += f" ／ 残り{max(0, RETIRE_STARTS - rec['starts'])}戦\n"
 
@@ -942,6 +988,7 @@ def get_weekly_summary(data=None, today=None, save=True):
 
     # ⭕ 世代交代をまたいでも差分が壊れないよう、スナップショットは撮り直す。
     data['weekly_snapshot'] = {
+        'horse_id': horse['id'],
         'minutes': minutes, 'starts': rec['starts'], 'wins': rec['win'],
         'last_week_minutes': max(0, week_minutes), 'date': today.isoformat(),
     }

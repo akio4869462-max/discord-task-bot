@@ -561,3 +561,80 @@ def test_race_day_notice_flags_an_entry_left_over_from_another_day():
     assert '2026-09-09' in text
     assert '取り直して' in text
     assert '今夜20:00' in text       # 黙って消えるのではなく、それが走ると伝える
+
+
+def test_race_day_notice_mentions_breeding_once_it_is_open():
+    data = grown(hl.load_stable(TODAY), 12)
+    assert '配合を予約できます' not in hl.format_race_day_notice(data=data, today=RACE_DAY)
+    data['current']['record']['starts'] = hl.BREEDING_OPEN_STARTS
+    assert '配合を予約できます' in hl.format_race_day_notice(data=data, today=RACE_DAY)
+
+
+# ====================================================
+# 細かい不整合の回帰テスト
+# ====================================================
+def test_stud_value_g1_bonus_needs_a_g1_win_not_just_the_class():
+    """⭕ G1クラスに上がった馬は必ず7勝しているので「G1クラスで勝ち≧1」は全員が該当した。"""
+    reached = {'record': {'win': 7}, 'class': 'G1',
+               'history': [{'class': 'G1', 'finish': 4}]}
+    won = {'record': {'win': 7}, 'class': 'G1',
+           'history': [{'class': 'G1', 'finish': 1}]}
+    assert hl.stud_value(won) == pytest.approx(hl.stud_value(reached) + 0.30)
+
+
+def test_available_races_skip_today_once_the_race_has_run():
+    """⭕ 開催日の20:00以降に登録すると当日の日付になり、次の開催日に古いレースとして走る。"""
+    from datetime import datetime
+    data = hl.load_stable(TODAY)
+    before = datetime(2026, 9, 12, 19, 0, tzinfo=hl.JST)    # 土曜 19:00
+    after = datetime(2026, 9, 12, 20, 30, tzinfo=hl.JST)    # 土曜 20:30（もう走った）
+    assert hl.available_races(data, now=before)[0] == RACE_DAY
+    assert hl.available_races(data, now=after)[0] == date(2026, 9, 16)   # 次の水曜
+
+
+def test_reaching_fifteen_starts_announces_that_breeding_is_open():
+    data = grown(hl.load_stable(TODAY), 12)
+    data['current']['record']['starts'] = hl.BREEDING_OPEN_STARTS - 1
+    race = {'id': 'x', 'name': 'テスト', 'date': RACE_DAY.isoformat(), 'course': '東京',
+            'surface': '芝', 'distance': 1600, 'cond': '良', 'class': '未勝利',
+            'grade': None, 'prize': 520, 'course_config': None}
+    mine = {'finish': 5, 'time': 96.0, 'last3f': 35.0, 'passing': [7, 7], 'style': '差し'}
+    events = hl._apply_result(data, race, mine, RACE_DAY, 16)
+    assert any('配合を予約できる' in e for e in events)
+
+
+def test_weekly_summary_survives_a_generation_change():
+    """⭕ 週の途中で引退→新馬になると、前の馬の累計を引いて「今週の調教: -38時間」になっていた。"""
+    data = grown(hl.load_stable(TODAY), 30)
+    data['current']['record']['starts'] = hl.RETIRE_STARTS - 1
+    hl.get_weekly_summary(data=data, today=date(2026, 9, 7), save=False)    # 先週のスナップ
+    before = hl.total_minutes(data['current']['growth'])
+    grown(data, 5, today=date(2026, 9, 9))                                  # 今週、引退前に積む
+    parent_week = hl.total_minutes(data['current']['growth']) - before
+    data['current']['history'].append({'date': '2026-09-09', 'race': '最後', 'course': '東京',
+                                       'surface': '芝', 'distance': 1600, 'finish': 2, 'field': 16})
+    data['current']['record']['starts'] = hl.RETIRE_STARTS                   # 20戦目を走った
+    hl.retire(data, date(2026, 9, 9))
+    born = hl.total_minutes(data['current']['growth'])
+    grown(data, 2, today=date(2026, 9, 11))                                  # 新馬に積む
+    child_week = hl.total_minutes(data['current']['growth']) - born
+
+    msg = hl.get_weekly_summary(data=data, today=date(2026, 9, 14), save=False)
+
+    # 前の馬の今週分 ＋ 新馬の今週分。配合で受け継いだ初期値は数えない
+    assert f"今週の調教: {(parent_week + child_week) / 60:.1f}時間" in msg
+    assert '今週の出走: 1戦' in msg
+    assert '世代交代' in msg
+
+
+def test_weekly_summary_lists_the_races_of_the_week():
+    data = grown(hl.load_stable(TODAY), 12)
+    hl.get_weekly_summary(data=data, today=date(2026, 9, 7), save=False)
+    _, races = hl.available_races(data, on=TODAY)
+    hl.enter_race(races[0], data=data, save=False)
+    out = hl.run_entry(data=data, today=RACE_DAY, save=False)
+
+    msg = hl.get_weekly_summary(data=data, today=date(2026, 9, 14), save=False)
+
+    assert '今週の出走: 1戦' in msg
+    assert races[0]['name'] in msg and f"{out['finish']}着" in msg
