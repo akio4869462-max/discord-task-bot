@@ -405,7 +405,8 @@ def simulate(race, entries, seed=None, baseline=None):
         # 賢い馬ほど不利を受けにくい
         trouble = None
         loss = 0.0
-        if rng.random() < TROUBLE_RATE * (1.0 - 0.25 * max(-1.0, min(1.0, wit_z))):
+        # 気性難の馬（trouble_scale > 1）は不利を受けやすい
+        if rng.random() < TROUBLE_RATE * e.get('trouble_scale', 1.0) * (1.0 - 0.25 * max(-1.0, min(1.0, wit_z))):
             loss = rng.uniform(*TROUBLE_LOSS) * dist_scale
             trouble = '不利'
 

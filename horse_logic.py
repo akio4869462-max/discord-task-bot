@@ -182,13 +182,16 @@ def suggest_name(rng=None, pool=None):
     return rng.choice(NAME_HEAD) + rng.choice(NAME_TAIL)
 
 
-def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=None):
+def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=None, line=None):
     """新しい現役馬を1頭つくります。"""
     rng = rng or random.Random()
     today = today or datetime.now(JST).date()
+    name = name or suggest_name(rng)
     return {
         'id': str(uuid.uuid4()),
-        'name': name or suggest_name(rng),
+        'name': name,
+        'line': line or name,                    # 系統。父から受け継ぐ。初代馬は自分が祖
+        'blood': {'nick': False, 'temper': False, 'tags': []},   # 配合で決まる血の効き目
         'sex': sex or rng.choice(['牡', '牝']),
         'debut': today.isoformat(),
         'growth': growth or _new_growth(),
@@ -221,19 +224,25 @@ def _default_stable(today=None):
     }
 
 
-def _pedigree_node(name, sire=None, dam=None):
+def _pedigree_node(name, sire=None, dam=None, line=None):
     if not name or name == '－':
         return None
-    return {'name': name, 'sire': sire, 'dam': dam}
+    node = {'name': name, 'sire': sire, 'dam': dam}
+    if line:
+        node['line'] = line                       # 系統（ニックスの判定に使う）
+    return node
 
 
 def _trim_pedigree(node, depth=PEDIGREE_DEPTH):
     """血統表を depth 代で打ち切ります（世代を重ねると指数的に膨らむ）。"""
     if node is None or depth <= 0:
         return None
-    return {'name': node['name'],
-            'sire': _trim_pedigree(node.get('sire'), depth - 1),
-            'dam': _trim_pedigree(node.get('dam'), depth - 1)}
+    out = {'name': node['name'],
+           'sire': _trim_pedigree(node.get('sire'), depth - 1),
+           'dam': _trim_pedigree(node.get('dam'), depth - 1)}
+    if node.get('line'):
+        out['line'] = node['line']
+    return out
 
 
 def _migrate_pedigree(pedigree):
@@ -284,6 +293,8 @@ def load_stable(today=None):
         horse.setdefault('breeding_plan', None)
         horse.setdefault('rest_until', None)
         horse.setdefault('slots', horse.get('record', {}).get('starts', 0))
+        horse.setdefault('blood', {'nick': False, 'temper': False, 'tags': []})
+        horse.setdefault('line', line_of(horse))
         horse.setdefault('record', {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0})
         horse['pedigree'] = _migrate_pedigree(horse.get('pedigree'))
         for k in PARAMS:
@@ -301,6 +312,7 @@ def load_stable(today=None):
         source = retired_by_name.get(s['name'], {})
         s.setdefault('id', source.get('id') or str(uuid.uuid4()))
         s['pedigree'] = _migrate_pedigree(s.get('pedigree') or source.get('pedigree'))
+        s.setdefault('line', source.get('line') or line_of(s))
     return data
 
 
@@ -340,11 +352,14 @@ def condition_of(data, today=None):
     if gap >= 2:
         return -1
     streak = data.get('current_streak', 0)
-    if streak >= 21:
-        return 2
-    if streak >= 7:
-        return 1
-    return 0
+    cond = 2 if streak >= 21 else (1 if streak >= 7 else 0)
+    horse = data.get('current') or {}
+    if horse.get('blood', {}).get('temper'):
+        # ⭕ 気性難は日によって調子が荒れる（3日に1日ほど1段落ちる）。日付と馬で決まる
+        import zlib
+        if zlib.crc32(f"{today.isoformat()}|{horse.get('id', '')}".encode('utf-8')) % 3 == 0:
+            cond -= 1
+    return max(-2, cond)
 
 
 CONDITION_LABELS = {2: '絶好調', 1: '好調', 0: '平常', -1: 'やや不調', -2: '不調'}
@@ -458,6 +473,8 @@ def player_entry(horse, data=None, today=None):
         'aptitude': dict(horse['aptitude']),
         'style': horse.get('style', '差し'),
         'condition': condition_of(data, today) if data is not None else 0,
+        # 気性難（濃いインブリード）は不利を受けやすい
+        'trouble_scale': TEMPER_TROUBLE_SCALE if horse.get('blood', {}).get('temper') else 1.0,
     }
 
 
@@ -676,6 +693,7 @@ def retire(data, today=None, save=False):
         'aptitude': dict(horse['aptitude']), 'record': dict(horse['record']),
         'stud_value': round(stud_value(horse), 3),
         'pedigree': horse.get('pedigree') or {'sire': None, 'dam': None},
+        'line': line_of(horse),
     })
 
     rng = random.Random(horse['id'])
@@ -685,8 +703,10 @@ def retire(data, today=None, save=False):
     if plan:
         data['current'] = breed(horse, plan['partner'], name=plan.get('foal_name'),
                                 today=today, rng=rng)
+        tags = data['current'].get('blood', {}).get('tags', [])
         born = (f"🧬 {_sire_dam(horse, plan['partner'])} の仔、"
-                f"第{data['generation']}世代 {data['current']['name']} がデビューします。")
+                f"第{data['generation']}世代 {data['current']['name']} がデビューします。"
+                + (f"（{' '.join(tags)}）" if tags else ''))
     else:
         inherited = {k: horse['growth'].get(k, 0) * INHERIT_RATE * stud_value(horse)
                      for k in PARAMS}
@@ -713,7 +733,7 @@ def pedigree_of(parent):
                'dam': _pedigree_node(f"{parent['name']}の母" if parent.get('bms') else None,
                                      sire=_pedigree_node(parent.get('bms')))}
     ped = _migrate_pedigree(ped)
-    return _trim_pedigree(_pedigree_node(parent['name'], ped.get('sire'), ped.get('dam')))
+    return _trim_pedigree(_pedigree_node(parent['name'], ped.get('sire'), ped.get('dam'), line=line_of(parent)))
 
 
 def _sire_dam(a, b):
@@ -759,17 +779,120 @@ def breed(a, b, name=None, today=None, rng=None):
     sire, dam = (a, b) if a['sex'] == '牡' else (b, a)
     ma, mb = parent_minutes(sire), parent_minutes(dam)
     value = (parent_stud_value(sire) + parent_stud_value(dam)) / 2
-    growth = {k: (ma[k] + mb[k]) / 2 * INHERIT_RATE * value for k in PARAMS}
+    fx = blood_effects(sire, dam)
+    growth = {k: (ma[k] + mb[k]) / 2 * INHERIT_RATE * value * (1 + fx['bonus']) for k in PARAMS}
     foal = new_horse(name=name, growth=growth,
                      pedigree={'sire': pedigree_of(sire), 'dam': pedigree_of(dam)},
-                     today=today, rng=rng)
+                     today=today, rng=rng, line=line_of(sire))
     foal['aptitude'] = inherit_aptitude(sire['aptitude'], dam['aptitude'], rng)
+    if fx['nick']:
+        # ⭕ ニックスは適性でも効く：親で一番差のある項目を、良いほうで確定させる
+        def grade(apt, k):
+            return APTITUDE_GRADES.index(apt.get(k, 'B')) if apt.get(k, 'B') in APTITUDE_GRADES else 1
+        gap, key = max((abs(grade(sire['aptitude'], k) - grade(dam['aptitude'], k)), k) for k in APTITUDE_KEYS)
+        if gap > 0:
+            foal['aptitude'][key] = APTITUDE_GRADES[min(grade(sire['aptitude'], key), grade(dam['aptitude'], key))]
+    foal['blood'] = {'nick': fx['nick'], 'temper': fx['temper'], 'tags': fx['tags']}
     return foal
+
+
+# ====================================================
+# 血の重なり（インブリード）と相性（ニックス）
+# ====================================================
+# ⭕ 血統表4代の中で同じ馬が2回以上出たらインブリード。血量は世代ごとに 1/2^n
+#    （父母50%・祖父母25%・3代12.5%・4代6.25%）を足す。3×4＝18.75%が「奇跡の血量」。
+#    ニックスは「父の系統×母父の系統」で決まる。系統は父から受け継ぐ名前で、
+#    組み合わせの相性は名前のハッシュで決定的に決める（手で相性表を持つと、系統が
+#    自家の馬名で増えていって破綻する）。同じ系統同士なら必ず同じ結果になる。
+NICK_RATE = 12              # 系統の組み合わせのうちニックスになる割合[%]
+NICK_BONUS = 0.10           # 受け継ぐ能力の上積み
+INBREED_MIRACLE = 0.1875    # 奇跡の血量（3×4・4×3）
+INBREED_MIRACLE_BONUS = 0.20
+INBREED_BONUS = 0.10        # 12.5%以上（奇跡以外）
+INBREED_MIN = 0.125         # これ未満は効かない（4×4で12.5%）
+INBREED_TEMPER = 0.25       # これ以上は気性難（2×3・2×2）
+BLOOD_BONUS_CAP = 0.30      # 上積みの合計の上限
+TEMPER_TROUBLE_SCALE = 2.0  # 気性難の馬が不利を受ける確率の倍率
+
+
+def line_of(parent):
+    """系統。自家の馬は父の系統、市場馬は父の名前、初代馬は自分の名前が系統の祖。"""
+    if parent.get('line'):
+        return parent['line']
+    ped = parent.get('pedigree') or {}
+    sire = ped.get('sire')
+    if isinstance(sire, dict) and sire.get('line'):
+        return sire['line']
+    if parent.get('sire'):                       # 市場馬（プールの父）
+        return parent['sire']
+    return parent['name']
+
+
+def is_nick(sire_line, dam_line):
+    import zlib
+    return zlib.crc32(f"{sire_line}|{dam_line}".encode('utf-8')) % 100 < NICK_RATE
+
+
+def _ancestors(node, depth, out):
+    """血統表を歩いて {名前: [世代, ...]} を集める。父母が1代。"""
+    if node is None or depth > PEDIGREE_DEPTH:
+        return
+    name = node.get('name')
+    if name and not name.endswith('の母'):        # 市場馬の名無しの母は数えない
+        out.setdefault(name, []).append(depth)
+    _ancestors(node.get('sire'), depth + 1, out)
+    _ancestors(node.get('dam'), depth + 1, out)
+
+
+def inbreeding(pedigree):
+    """血統表の中で2回以上出る馬を [(名前, [世代...], 血量)] で返す（血量の大きい順）。"""
+    found = {}
+    _ancestors((pedigree or {}).get('sire'), 1, found)
+    _ancestors((pedigree or {}).get('dam'), 1, found)
+    crosses = []
+    for name, gens in found.items():
+        if len(gens) >= 2:
+            blood = sum(0.5 ** g for g in gens)
+            crosses.append((name, sorted(gens), blood))
+    return sorted(crosses, key=lambda c: -c[2])
+
+
+def cross_label(gens):
+    return '×'.join(str(g) for g in gens)
+
+
+def blood_effects(sire, dam):
+    """配合の血の効き目。予約前の表示と、誕生時の両方で使う。
+
+    Returns:
+        dict: nick(bool), inbreed([(name, gens, blood)]), bonus(倍率の上積み), temper(bool), tags([表示用])
+    """
+    ped = {'sire': pedigree_of(sire), 'dam': pedigree_of(dam)}
+    crosses = inbreeding(ped)
+    nick = is_nick(line_of(sire), line_of(dam))
+    bonus, temper, tags = 0.0, False, []
+    if nick:
+        bonus += NICK_BONUS
+        tags.append('◎ニックス')
+    if crosses:
+        name, gens, blood = crosses[0]
+        if abs(blood - INBREED_MIRACLE) < 1e-9:
+            bonus += INBREED_MIRACLE_BONUS
+            tags.append(f"★{name} {cross_label(gens)}（奇跡の血量）")
+        elif blood >= INBREED_TEMPER:
+            bonus += INBREED_BONUS
+            temper = True
+            tags.append(f"⚠{name} {cross_label(gens)}（濃すぎ・気性難）")
+        elif blood >= INBREED_MIN:
+            bonus += INBREED_BONUS
+            tags.append(f"★{name} {cross_label(gens)}")
+    return {'nick': nick, 'inbreed': crosses, 'bonus': min(BLOOD_BONUS_CAP, bonus),
+            'temper': temper, 'tags': tags}
 
 
 def stud_fee(cls):
     """市場の馬の種付け料（万円）。そのクラスの1着賞金に連動させます。"""
-    return race_calendar.CLASS_INFO.get(cls, race_calendar.CLASS_INFO['1勝'])['prize'] * STUD_FEE_RATIO
+    return int(race_calendar.CLASS_INFO.get(cls, race_calendar.CLASS_INFO['1勝'])['prize'] * STUD_FEE_RATIO)
 
 
 def _market_seed(horse):
@@ -813,7 +936,10 @@ def breeding_candidates(data, pool=None):
     want = '牝' if horse['sex'] == '牡' else '牡'
     own = [dict(s, key=f"own:{s['id']}", source='own', fee=0)
            for s in data['stallions'] if s['sex'] == want]
-    return own + market(data, pool)
+    cands = own + market(data, pool)
+    for c in cands:                               # 予約前に血の効き目を見せる（狙って選べる）
+        c['blood_tags'] = blood_effects(horse, c)['tags']
+    return cands
 
 
 def breeding_status(horse):
@@ -919,13 +1045,19 @@ def _ped_name(node):
 def format_pedigree(horse):
     """3代血統表を整形します。"""
     ped = horse.get('pedigree') or {}
-    lines = [f"🧬 **{horse['name']} の血統**"]
+    lines = [f"🧬 **{horse['name']} の血統**（{line_of(horse)}系）"]
     for side, label in (('sire', '父'), ('dam', '母')):
         node = ped.get(side)
         lines.append(f"{label}: {_ped_name(node)}")
         if node:
             lines.append(f"　├ {label}父: {_ped_name(node.get('sire'))}")
             lines.append(f"　└ {label}母: {_ped_name(node.get('dam'))}")
+    blood = horse.get('blood') or {}
+    if blood.get('tags'):
+        lines.append('　'.join(blood['tags']))
+    crosses = inbreeding(ped)
+    if crosses and not blood.get('tags'):
+        lines.append('インブリード: ' + '、'.join(f"{n} {cross_label(g)}" for n, g, _ in crosses[:3]))
     return '\n'.join(lines)
 
 
@@ -940,7 +1072,8 @@ def format_candidate(c):
     fee = '無料' if c['fee'] == 0 else f"{c['fee']:,}万円"
     origin = '自家' if c['source'] == 'own' else '市場'
     return (f"[{origin}] **{c['name']}**（{c['sex']}・{c['class']}）能力平均 {avg}"
-            f" ／ {format_aptitude(c['aptitude'])} ／ {fee}")
+            f" ／ {format_aptitude(c['aptitude'])} ／ {fee}"
+            + (f" ／ {' '.join(c['blood_tags'])}" if c.get('blood_tags') else ''))
 
 
 def format_candidates(data, pool=None):
