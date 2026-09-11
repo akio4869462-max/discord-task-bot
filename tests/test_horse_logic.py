@@ -39,15 +39,18 @@ def test_ability_starts_at_debut_level():
     assert hl.ability_of(0) == hl.BASE_ABILITY == 140
 
 
-def test_fifty_hours_reaches_g1_level():
-    """設計どおり、50時間でG1級（能力680）に届くこと。"""
-    per_param = 50 * 60 / len(hl.PARAMS)
+def test_growth_alone_does_not_reach_g1_level_in_a_career():
+    """⭕ 「配合も育成も上手くやって7勝（＝ちょうどG1）」の弧。育成だけでG1平均(680)に
+       届くには216時間要るので、現役10週では配合の上積みが無いと届かない。"""
+    per_param = 216 * 60 / len(hl.PARAMS)
     assert hl.ability_of(per_param) == pytest.approx(680, abs=3)
+    ten_weeks = 19 * 10 * 60 / len(hl.PARAMS)        # 換算19h/週 × 10週
+    assert hl.ability_of(ten_weeks) < 680
 
 
 def test_growth_curve_matches_the_documented_milestones():
     """docs/RACE_DESIGN.md の到達時間の表と一致すること。"""
-    for hours, ability in [(9.6, 310), (17.6, 400), (28.0, 500), (50.0, 680)]:
+    for hours, ability in [(41.5, 310), (76.1, 400), (121.2, 500), (216.2, 680)]:
         per_param = hours * 60 / len(hl.PARAMS)
         assert hl.ability_of(per_param) == pytest.approx(ability, abs=4), hours
 
@@ -335,10 +338,12 @@ def test_running_a_race_updates_the_record():
 
 def test_the_same_horse_and_race_always_give_the_same_result():
     """seedは馬とレースから決まるので、結果は再現できる。"""
+    import copy
+    base = grown(hl.load_stable(TODAY), 12)
+    base['current']['id'] = 'fixed-id'
     finishes = []
     for _ in range(2):
-        data = grown(hl.load_stable(TODAY), 12)
-        data['current']['id'] = 'fixed-id'
+        data = copy.deepcopy(base)                   # 同じ馬（適性・性別も同じ）で2回走らせる
         _, races = hl.available_races(data, on=TODAY)
         hl.enter_race(races[0], data=data, save=False)
         finishes.append(hl.run_entry(data=data, today=RACE_DAY, save=False)['finish'])
