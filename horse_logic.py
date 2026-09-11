@@ -77,6 +77,20 @@ PRIZE_SHARE = {1: 1.0, 2: 0.40, 3: 0.25, 4: 0.15, 5: 0.10}
 APTITUDE_GRADES = ('A', 'B', 'C', 'D')
 BANDS = ('sprint', 'mile', 'middle', 'long')
 BAND_NAMES = {'sprint': '短距離', 'mile': 'マイル', 'middle': '中距離', 'long': '長距離'}
+APTITUDE_KEYS = ('turf', 'dirt') + BANDS
+
+# ====================================================
+# 🧬 配合
+# ====================================================
+# ⭕ 配合の狙いは能力より「適性を血で繋ぐ」こと。数字の根拠は docs/RACE_DESIGN.md §8。
+BREEDING_OPEN_STARTS = 15   # 何戦目から次の配合を予約できるか
+STUD_FEE_RATIO = 5          # 種付け料 ＝ そのクラスの1着賞金 × この倍率
+MARKET_SIZE_PER_TIER = 2    # 市場に出す頭数（下級・中級・上級それぞれ）
+MARKET_TIERS = (('未勝利', '1勝', '2勝'), ('3勝', 'OP', 'G3'), ('G2', 'G1'))
+APTITUDE_MUTATION = 0.15    # 適性が親から受け継いだ段からずれる確率
+PEDIGREE_DEPTH = 4          # 血統表を何代まで保存するか
+# 市場の馬の種牡馬価値。成績を持たないのでクラスで決める。
+MARKET_STUD_VALUE = {'G1': 1.30, 'G2': 1.20, 'G3': 1.15, 'OP': 1.10}
 
 # 初代馬の名前の候補。実在馬名と衝突しないものだけを使う。
 NAME_HEAD = ['ミライ', 'アオゾラ', 'コウテイ', 'シンゲツ', 'ハルカゼ', 'ホシノ', 'トキワ',
@@ -171,9 +185,12 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
         'aptitude': _random_aptitude(rng),
         'class': '未勝利',
         'record': {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0},
-        'pedigree': pedigree or {'sire': '－', 'dam': '－'},
+        # ⭕ 血統表は再帰ノード {'name', 'sire': node|None, 'dam': node|None} で持つ。
+        #    名前の平面だとインブリードやニックスを見るときに作り直しになる。
+        'pedigree': pedigree or {'sire': None, 'dam': None},
         'history': [],
         'entry': None,
+        'breeding_plan': None,
     }
 
 
@@ -183,9 +200,34 @@ def _default_stable(today=None):
         'current': new_horse(today=today),
         'retired': [],
         'stallions': [],
+        'funds': 0,
         'last_active_date': None,
         'current_streak': 0,
     }
+
+
+def _pedigree_node(name, sire=None, dam=None):
+    if not name or name == '－':
+        return None
+    return {'name': name, 'sire': sire, 'dam': dam}
+
+
+def _trim_pedigree(node, depth=PEDIGREE_DEPTH):
+    """血統表を depth 代で打ち切ります（世代を重ねると指数的に膨らむ）。"""
+    if node is None or depth <= 0:
+        return None
+    return {'name': node['name'],
+            'sire': _trim_pedigree(node.get('sire'), depth - 1),
+            'dam': _trim_pedigree(node.get('dam'), depth - 1)}
+
+
+def _migrate_pedigree(pedigree):
+    """旧形式 {'sire': '名前', 'dam': '－'} を再帰ノードへ読み替えます。"""
+    fixed = {}
+    for side in ('sire', 'dam'):
+        value = (pedigree or {}).get(side)
+        fixed[side] = _pedigree_node(value) if isinstance(value, str) else value
+    return fixed
 
 
 def _migrate_legacy(stable, legacy):
@@ -224,9 +266,24 @@ def load_stable(today=None):
     if horse:
         horse.setdefault('entry', None)
         horse.setdefault('history', [])
+        horse.setdefault('breeding_plan', None)
         horse.setdefault('record', {'starts': 0, 'win': 0, 'place': 0, 'show': 0, 'prize': 0})
+        horse['pedigree'] = _migrate_pedigree(horse.get('pedigree'))
         for k in PARAMS:
             horse.setdefault('growth', {}).setdefault(k, 0.0)
+
+    # ⭕ 資金は配合で初めて使い道ができた。それまでの賞金は成績にしか残っていないので、
+    #    現役馬と引退馬の賞金の合計で補う（読み込み時移行の流儀）。
+    if 'funds' not in data:
+        data['funds'] = sum(h.get('record', {}).get('prize', 0)
+                            for h in [horse] + data['retired'] if h)
+
+    # 引退馬は配合の相手になるので、選ぶためのidと血統表を持たせる
+    retired_by_name = {h['name']: h for h in data['retired']}
+    for s in data['stallions']:
+        source = retired_by_name.get(s['name'], {})
+        s.setdefault('id', source.get('id') or str(uuid.uuid4()))
+        s['pedigree'] = _migrate_pedigree(s.get('pedigree') or source.get('pedigree'))
     return data
 
 
@@ -457,7 +514,9 @@ def _apply_result(data, race, mine, today, field_size):
         rec['place'] += 1
     if mine['finish'] <= 3:
         rec['show'] += 1
-    rec['prize'] += int(race.get('prize', 0) * PRIZE_SHARE.get(mine['finish'], 0))
+    prize = int(race.get('prize', 0) * PRIZE_SHARE.get(mine['finish'], 0))
+    rec['prize'] += prize
+    data['funds'] = data.get('funds', 0) + prize     # 種付け料の原資
 
     horse['history'].append({
         'date': today.isoformat(), 'race': race['name'],
@@ -505,28 +564,203 @@ def retire(data, today=None, save=False):
     horse['final_params'] = derive_params(horse['growth'])
 
     data['retired'].append(horse)
-    # ⭕ 配合を後から足せるよう、引退馬は能力・成績・適性を持った実体として残す。
+    # ⭕ 引退馬は配合の相手になるので、能力・成績・適性・血統を持った実体として残す。
     #    名前だけの飾りにするとデータ構造から作り直すことになる。
     data['stallions'].append({
-        'name': horse['name'], 'sex': horse['sex'], 'class': horse['class'],
-        'params': horse['final_params'], 'aptitude': dict(horse['aptitude']),
-        'record': dict(horse['record']), 'stud_value': round(stud_value(horse), 3),
+        'id': horse['id'], 'name': horse['name'], 'sex': horse['sex'],
+        'class': horse['class'], 'generation': data.get('generation', 1),
+        'params': horse['final_params'], 'growth': dict(horse['growth']),
+        'aptitude': dict(horse['aptitude']), 'record': dict(horse['record']),
+        'stud_value': round(stud_value(horse), 3),
+        'pedigree': horse.get('pedigree') or {'sire': None, 'dam': None},
     })
 
     rng = random.Random(horse['id'])
-    inherited = {k: horse['growth'].get(k, 0) * INHERIT_RATE * stud_value(horse)
-                 for k in PARAMS}
+    plan = horse.get('breeding_plan')
     parent = horse['name']
     data['generation'] = data.get('generation', 1) + 1
-    data['current'] = new_horse(
-        growth=inherited,
-        pedigree={'sire': parent if horse['sex'] == '牡' else '－',
-                  'dam': parent if horse['sex'] == '牝' else '－'},
-        today=today, rng=rng)
+    if plan:
+        data['current'] = breed(horse, plan['partner'], name=plan.get('foal_name'),
+                                today=today, rng=rng)
+        born = (f"🧬 {_sire_dam(horse, plan['partner'])} の仔、"
+                f"第{data['generation']}世代 {data['current']['name']} がデビューします。")
+    else:
+        inherited = {k: horse['growth'].get(k, 0) * INHERIT_RATE * stud_value(horse)
+                     for k in PARAMS}
+        data['current'] = new_horse(
+            growth=inherited,
+            pedigree={'sire': pedigree_of(horse) if horse['sex'] == '牡' else None,
+                      'dam': pedigree_of(horse) if horse['sex'] == '牝' else None},
+            today=today, rng=rng)
+        born = f"第{data['generation']}世代 {data['current']['name']} がデビューします。"
     if save:
         save_stable(data)
-    return (f"🎓 {parent} が{RETIRE_STARTS}戦を走り切って引退しました。"
-            f"第{data['generation']}世代 {data['current']['name']} がデビューします。")
+    return f"🎓 {parent} が{RETIRE_STARTS}戦を走り切って引退しました。{born}"
+
+
+# ====================================================
+# 配合
+# ====================================================
+def pedigree_of(parent):
+    """親（現役馬・引退馬・市場馬）を血統表のノードにします。"""
+    ped = parent.get('pedigree')
+    if ped is None and 'sire' in parent:
+        # 市場馬はプールの父(sire)と母父(bms)しか持たない。母は名無しなので「○○の母」。
+        ped = {'sire': _pedigree_node(parent.get('sire')),
+               'dam': _pedigree_node(f"{parent['name']}の母" if parent.get('bms') else None,
+                                     sire=_pedigree_node(parent.get('bms')))}
+    ped = _migrate_pedigree(ped)
+    return _trim_pedigree(_pedigree_node(parent['name'], ped.get('sire'), ped.get('dam')))
+
+
+def _sire_dam(a, b):
+    sire, dam = (a, b) if a['sex'] == '牡' else (b, a)
+    return f"{sire['name']} × {dam['name']}"
+
+
+def parent_minutes(parent):
+    """親の積み上げ（分）。市場馬は能力値しか持たないので逆算します。"""
+    if parent.get('growth'):
+        return {k: parent['growth'].get(k, 0) for k in PARAMS}
+    return {k: minutes_for(parent.get('params', {}).get(k, BASE_ABILITY)) for k in PARAMS}
+
+
+def parent_stud_value(parent):
+    if 'stud_value' in parent:
+        return parent['stud_value']
+    if 'record' in parent:
+        return stud_value(parent)
+    return MARKET_STUD_VALUE.get(parent.get('class'), 1.0)
+
+
+def inherit_aptitude(sire_apt, dam_apt, rng):
+    """適性を項目ごとに父か母から受け継ぎ、ときどき1段ずらします。"""
+    apt = {}
+    for key in APTITUDE_KEYS:
+        grade = rng.choice([sire_apt.get(key, 'B'), dam_apt.get(key, 'B')])
+        if rng.random() < APTITUDE_MUTATION:
+            i = APTITUDE_GRADES.index(grade) if grade in APTITUDE_GRADES else 1
+            # ⭕ 端（A/D）では内側にしかずれない。端で押し戻すと変異の半分が消える。
+            steps = [d for d in (-1, 1) if 0 <= i + d < len(APTITUDE_GRADES)]
+            grade = APTITUDE_GRADES[i + rng.choice(steps)]
+        apt[key] = grade
+    return apt
+
+
+def breed(a, b, name=None, today=None, rng=None):
+    """2頭から仔を1頭つくります。どちらが父でも構いません。
+
+    能力の初期値 ＝ 両親の積み上げの平均 × INHERIT_RATE × 両親の種牡馬価値の平均
+    """
+    rng = rng or random.Random()
+    sire, dam = (a, b) if a['sex'] == '牡' else (b, a)
+    ma, mb = parent_minutes(sire), parent_minutes(dam)
+    value = (parent_stud_value(sire) + parent_stud_value(dam)) / 2
+    growth = {k: (ma[k] + mb[k]) / 2 * INHERIT_RATE * value for k in PARAMS}
+    foal = new_horse(name=name, growth=growth,
+                     pedigree={'sire': pedigree_of(sire), 'dam': pedigree_of(dam)},
+                     today=today, rng=rng)
+    foal['aptitude'] = inherit_aptitude(sire['aptitude'], dam['aptitude'], rng)
+    return foal
+
+
+def stud_fee(cls):
+    """市場の馬の種付け料（万円）。そのクラスの1着賞金に連動させます。"""
+    return race_calendar.CLASS_INFO.get(cls, race_calendar.CLASS_INFO['1勝'])['prize'] * STUD_FEE_RATIO
+
+
+def _market_seed(horse):
+    import zlib
+    return zlib.crc32((horse['id'] + '|market').encode('utf-8'))
+
+
+def market(data, pool=None):
+    """現役馬と異性の市場の馬を、下級・中級・上級から2頭ずつ出します。
+
+    ⭕ 現役馬のidをシードにするので、同じ世代のあいだ市場は変わらない。
+       見るたびに入れ替わると比較できない。
+    """
+    horse = data['current']
+    want = '牝' if horse['sex'] == '牡' else '牡'
+    try:
+        horses = (pool or rivals.load_pool())['horses']
+    except (IOError, KeyError):
+        return []
+    rng = random.Random(_market_seed(horse))
+    picked = []
+    for tier in MARKET_TIERS:
+        pool_tier = sorted((h for h in horses if h['sex'] == want and h['class'] in tier),
+                           key=lambda h: h['name'])
+        picked.extend(rng.sample(pool_tier, min(MARKET_SIZE_PER_TIER, len(pool_tier))))
+    out = []
+    for i, h in enumerate(picked):
+        out.append({
+            'key': f'market:{i}', 'source': 'market',
+            'name': h['name'], 'sex': h['sex'], 'class': h['class'],
+            'params': dict(h['params']), 'aptitude': dict(h['aptitude']),
+            'sire': h.get('sire'), 'bms': h.get('bms'),
+            'fee': stud_fee(h['class']),
+        })
+    return out
+
+
+def breeding_candidates(data, pool=None):
+    """配合の相手の一覧。自分の引退馬（無料）と市場の馬（有料）。"""
+    horse = data['current']
+    want = '牝' if horse['sex'] == '牡' else '牡'
+    own = [dict(s, key=f"own:{s['id']}", source='own', fee=0)
+           for s in data['stallions'] if s['sex'] == want]
+    return own + market(data, pool)
+
+
+def breeding_status(horse):
+    """配合を予約できるか。(bool, 理由) を返します。"""
+    starts = horse['record']['starts']
+    if horse.get('breeding_plan'):
+        return False, '予約済み'
+    if starts < BREEDING_OPEN_STARTS:
+        return False, f"あと{BREEDING_OPEN_STARTS - starts}戦で予約できます"
+    return True, ''
+
+
+def reserve_breeding(key, foal_name=None, data=None, save=True, pool=None):
+    """配合を予約し、種付け料を資金から引きます。
+
+    Raises:
+        ValueError: 予約できない状態・相手が見つからない・資金不足
+    """
+    data = data if data is not None else load_stable()
+    horse = data['current']
+    ok, reason = breeding_status(horse)
+    if not ok:
+        raise ValueError(reason)
+    partner = next((c for c in breeding_candidates(data, pool) if c['key'] == key), None)
+    if partner is None:
+        raise ValueError('その相手は選べません')
+    if partner['fee'] > data.get('funds', 0):
+        raise ValueError(f"資金が足りません（{partner['fee']:,}万円 ／ 手元 {data.get('funds', 0):,}万円）")
+
+    data['funds'] = data.get('funds', 0) - partner['fee']
+    horse['breeding_plan'] = {
+        'partner': partner, 'fee': partner['fee'],
+        'foal_name': (foal_name or '').strip() or None,
+    }
+    if save:
+        save_stable(data)
+    return horse['breeding_plan']
+
+
+def cancel_breeding(data=None, save=True):
+    """配合の予約を取り消し、種付け料を戻します。"""
+    data = data if data is not None else load_stable()
+    horse = data['current']
+    plan = horse.get('breeding_plan')
+    if plan:
+        data['funds'] = data.get('funds', 0) + plan.get('fee', 0)
+        horse['breeding_plan'] = None
+        if save:
+            save_stable(data)
+    return plan
 
 
 # ====================================================
@@ -556,12 +790,69 @@ def format_horse(data=None, today=None):
                  f"（2着{rec['place'] - rec['win']} 3着{rec['show'] - rec['place']}）"
                  f" 獲得賞金 {rec['prize']:,}万円")
     lines.append(f"残り{max(0, RETIRE_STARTS - rec['starts'])}戦で引退"
-                 f" ／ 累計 {total_minutes(horse['growth']) / 60:.1f}時間")
+                 f" ／ 累計 {total_minutes(horse['growth']) / 60:.1f}時間"
+                 f" ／ 厩舎資金 {data.get('funds', 0):,}万円")
+
+    ped = horse.get('pedigree') or {}
+    if ped.get('sire') or ped.get('dam'):
+        lines.append(f"血統: 父 {_ped_name(ped.get('sire'))} ／ 母 {_ped_name(ped.get('dam'))}")
 
     if horse.get('entry'):
         e = horse['entry']
         lines.append(f"📋 出走登録済み: {e['date']} {e['name']}"
                      f"（{e['course']}{e['surface']}{e['distance']}m）")
+    plan = horse.get('breeding_plan')
+    if plan:
+        p = plan['partner']
+        lines.append(f"🧬 配合予約: {p['name']}（{p['class']}）"
+                     + (f" 仔の名前 {plan['foal_name']}" if plan.get('foal_name') else ''))
+    return '\n'.join(lines)
+
+
+def _ped_name(node):
+    return node['name'] if node else '－'
+
+
+def format_pedigree(horse):
+    """3代血統表を整形します。"""
+    ped = horse.get('pedigree') or {}
+    lines = [f"🧬 **{horse['name']} の血統**"]
+    for side, label in (('sire', '父'), ('dam', '母')):
+        node = ped.get(side)
+        lines.append(f"{label}: {_ped_name(node)}")
+        if node:
+            lines.append(f"　├ {label}父: {_ped_name(node.get('sire'))}")
+            lines.append(f"　└ {label}母: {_ped_name(node.get('dam'))}")
+    return '\n'.join(lines)
+
+
+def format_aptitude(apt):
+    return (f"芝{apt.get('turf', 'B')} ダ{apt.get('dirt', 'B')} "
+            + ' '.join(f"{BAND_NAMES[b]}{apt.get(b, 'B')}" for b in BANDS))
+
+
+def format_candidate(c):
+    """配合の相手1頭を1行にします。"""
+    avg = int(sum(c['params'].get(k, BASE_ABILITY) for k in PARAMS) / len(PARAMS))
+    fee = '無料' if c['fee'] == 0 else f"{c['fee']:,}万円"
+    origin = '自家' if c['source'] == 'own' else '市場'
+    return (f"[{origin}] **{c['name']}**（{c['sex']}・{c['class']}）能力平均 {avg}"
+            f" ／ {format_aptitude(c['aptitude'])} ／ {fee}")
+
+
+def format_candidates(data, pool=None):
+    """配合の相手一覧を整形します。"""
+    horse = data['current']
+    ok, reason = breeding_status(horse)
+    head = (f"🧬 **{horse['name']}（{horse['sex']}）の配合相手** ／ "
+            f"厩舎資金 {data.get('funds', 0):,}万円")
+    if not ok:
+        return f"{head}\n{reason}"
+    cands = breeding_candidates(data, pool)
+    if not cands:
+        return f"{head}\n相手がいません。"
+    lines = [head, f"現在の適性: {format_aptitude(horse['aptitude'])}", '']
+    lines += [f"{i}. {format_candidate(c)}" for i, c in enumerate(cands, start=1)]
     return '\n'.join(lines)
 
 

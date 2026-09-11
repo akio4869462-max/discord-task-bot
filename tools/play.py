@@ -8,6 +8,8 @@ Bot を起動しないので、テスト用のトークンは要らない。
     PYTHONIOENCODING=utf-8 python tools/play.py races
     PYTHONIOENCODING=utf-8 python tools/play.py enter 2 差し
     PYTHONIOENCODING=utf-8 python tools/play.py race --open
+    PYTHONIOENCODING=utf-8 python tools/play.py breed --pick 3 --name ユメノコ
+    PYTHONIOENCODING=utf-8 python tools/play.py pedigree
     PYTHONIOENCODING=utf-8 python tools/play.py sim --weeks 10 --hours 10
 
 ⭕ sim は本物の厩舎データを触らない。釣り合いを見るためだけの使い捨ての馬で回す。
@@ -78,6 +80,36 @@ def cmd_race(args):
     print(f"\n🎬 再生用HTML: {path}")
     if args.open:
         webbrowser.open('file://' + path.replace('\\', '/'))
+
+
+def cmd_breed(args):
+    data = hl.load_stable()
+    if args.cancel:
+        plan = hl.cancel_breeding(data)
+        print(f"↩️ {plan['partner']['name']} の予約を取り消し、{plan['fee']:,}万円を戻しました。"
+              if plan else "予約はありません。")
+        return
+    if args.pick is None:
+        print(hl.format_candidates(data))
+        if hl.breeding_status(data['current'])[0]:
+            print("\n予約するには: python tools/play.py breed --pick <番号> [--name 仔の名前]")
+        return
+    cands = hl.breeding_candidates(data)
+    if not 1 <= args.pick <= len(cands):
+        print(f"⚠️ 1〜{len(cands)} で指定してください。")
+        return
+    try:
+        plan = hl.reserve_breeding(cands[args.pick - 1]['key'], foal_name=args.name, data=data)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
+    p = plan['partner']
+    print(f"🧬 {p['name']}（{p['class']}）と配合を予約しました。種付け料 {plan['fee']:,}万円"
+          f" ／ 残り資金 {data['funds']:,}万円")
+
+
+def cmd_pedigree(args):
+    print(hl.format_pedigree(hl.load_stable()['current']))
 
 
 def cmd_sim(args):
@@ -172,6 +204,14 @@ def main():
     p = sub.add_parser('race', help='登録したレースを走らせる')
     p.add_argument('--open', action='store_true', help='再生用HTMLをブラウザで開く')
     p.set_defaults(func=cmd_race)
+
+    p = sub.add_parser('breed', help='配合の相手を見る・予約する')
+    p.add_argument('--pick', type=int, help='breed で表示された番号')
+    p.add_argument('--name', help='仔の名前（省略すると自動）')
+    p.add_argument('--cancel', action='store_true', help='予約を取り消して種付け料を戻す')
+    p.set_defaults(func=cmd_breed)
+
+    sub.add_parser('pedigree', help='現役馬の血統表を見る').set_defaults(func=cmd_pedigree)
 
     p = sub.add_parser('sim', help='数週間ぶんを早送りして釣り合いを見る')
     p.add_argument('--weeks', type=int, default=10)

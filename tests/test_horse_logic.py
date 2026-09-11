@@ -411,7 +411,8 @@ def test_the_next_generation_inherits_from_the_parent():
     hl.retire(data, RACE_DAY)
 
     child = data['current']
-    assert child['pedigree']['sire'] == parent or child['pedigree']['dam'] == parent
+    parents = [hl._ped_name(child['pedigree'][s]) for s in ('sire', 'dam')]
+    assert parent in parents and '－' in parents        # 相手なしなら片親だけ
     for key in hl.PARAMS:
         assert 0 < child['growth'][key] < parent_growth[key]
     assert hl.derive_params(child['growth'])['speed'] > hl.BASE_ABILITY
