@@ -124,25 +124,4 @@ async def exam_stats_command(interaction: discord.Interaction):
     await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
 
 
-class ExamResetView(View):
-    """⭕ 記録を消すのは取り返しがつかないので、ボタンで一度確認を挟む。"""
-    def __init__(self):
-        super().__init__(timeout=60)
-
-    @discord.ui.button(label="記録を消す", style=discord.ButtonStyle.danger)
-    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content=exam_logic.reset_exam_data(), view=None)
-
-    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
-    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="リセットはやめました。", view=None)
-
-
-@exam_group.command(name="reset", description="演習記録を消して最初からにします（消す前の記録は退避）")
-async def exam_reset_command(interaction: discord.Interaction):
-    count = len(exam_logic.load_exam_data().get('sessions', []))
-    await interaction.response.send_message(
-        f"演習記録 {count}件 を消して最初からにします。よろしいですか？", view=ExamResetView(), ephemeral=True)
-
-
 tree.add_command(exam_group)

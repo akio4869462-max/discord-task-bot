@@ -66,29 +66,6 @@ def save_exam_data(data):
         print(f"⚠️ [ERROR] 演習記録の保存に失敗しました: {e}")
 
 
-def reset_exam_data(now=None):
-    """演習記録を消して最初からにします。
-
-    ⭕ 消す前のファイルは data/exam_data.<日付>.bak.json に退避する。誤操作で全部
-       消えるのは取り返しがつかないので、戻せる形にしておく。
-
-    Returns:
-        str: 結果メッセージ。
-    """
-    now = now or datetime.now(JST)
-    data = load_exam_data()
-    count = len(data.get('sessions', []))
-    if count and os.path.exists(EXAM_DATA_FILE):
-        backup = EXAM_DATA_FILE.replace('.json', f".{now.strftime('%Y%m%d%H%M%S')}.bak.json")
-        try:
-            os.replace(EXAM_DATA_FILE, backup)
-        except OSError as e:
-            return f"❌ 退避に失敗したので消していません: {e}"
-    save_exam_data({"sessions": [], "weekly_snapshot": {}})
-    return f"🧹 演習記録をリセットしました（{count}件）。" + (
-        "消す前の記録は退避してあります。" if count else "")
-
-
 def log_session(field, total, correct, now=None):
     """過去問演習の結果を記録します。
 
