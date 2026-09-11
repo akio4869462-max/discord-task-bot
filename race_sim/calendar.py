@@ -45,6 +45,17 @@ NAME_HEAD = [
 NAME_TAIL_OPEN = ['ステークス', 'カップ', '記念']
 NAME_TAIL_COND = ['特別', '賞']
 
+# 遠征費（万円）。美浦（関東）所属の想定で、東京・中山が地元。
+# ⭕ クラスに関わらず一定にする（実態どおり）。未勝利の4着賞金(78万)より高いので
+#    序盤は行き先で損得が出るが、G1級になれば誤差になる。
+HOME_COURSES = {'東京', '中山'}
+TRAVEL_COST = {
+    '東京': 0, '中山': 0,
+    '福島': 80, '新潟': 80,
+    '中京': 150, '京都': 200, '阪神': 200,
+    '小倉': 300, '函館': 300, '札幌': 300,
+}
+
 # 内回り・外回りがある競馬場。⭕ ビューアが描き分けられるよう race に持たせる。
 DUAL_COURSES = {'中山', '京都', '阪神', '新潟'}
 
@@ -128,15 +139,14 @@ def offers(cls, date, count=OFFER_COUNT, baseline=None, pool=None, aptitude=None
 
     picked, items = [], list(zip(cands, weights))
     for _ in range(min(count, len(items))):
-        total = sum(w for _, w in items)
-        r = rng.random() * total
-        acc = 0.0
-        for i, (c, w) in enumerate(items):
-            acc += w
-            if r <= acc:
-                picked.append(c)
-                items.pop(i)
-                break
+        picked.append(_weighted_pop(rng, items))
+
+    # ⭕ 資金が無くても必ず出走できるよう、地元（遠征費0）のレースを1本は入れる。
+    #    地元が1本も無ければ、残りの候補から地元を1本引いて最後の1本と入れ替える。
+    if not any(c[0] in HOME_COURSES for c in picked):
+        home = [(c, w) for c, w in items if c[0] in HOME_COURSES]
+        if home:
+            picked[-1] = _weighted_pop(rng, home)
 
     info = CLASS_INFO.get(cls, CLASS_INFO['1勝'])
     races, used_names = [], set()
@@ -152,11 +162,25 @@ def offers(cls, date, count=OFFER_COUNT, baseline=None, pool=None, aptitude=None
             'class': cls,
             'grade': info['grade'],
             'prize': info['prize'],
+            'travel': TRAVEL_COST.get(course, 0),
             # ⭕ ビューアが内回り・外回りを描き分けられるように持たせる。
             #    いまは距離で決めているだけの目安。
             'course_config': _config_of(course, distance),
         })
     return races
+
+
+def _weighted_pop(rng, items):
+    """(候補, 重み) のリストから重みつきで1つ引き、リストから取り除く。"""
+    total = sum(w for _, w in items)
+    r = rng.random() * total
+    acc = 0.0
+    for i, (c, w) in enumerate(items):
+        acc += w
+        if r <= acc:
+            items.pop(i)
+            return c
+    return items.pop()[0]
 
 
 def _config_of(course, distance):

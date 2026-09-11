@@ -454,8 +454,8 @@ class RaceDropdown(Select):
             discord.SelectOption(
                 label=f"{r['name']}"[:100],
                 value=r['id'],
-                description=f"{r['course']}{r['surface']}{r['distance']}m {r['cond']}"
-                            f" ／ 1着{r['prize']:,}万円"[:100])
+                description=(f"{r['course']}{r['surface']}{r['distance']}m {r['cond']}"
+                             f" ／ 1着{r['prize']:,}万円{horse_logic.format_travel(r)}")[:100])
             for r in races
         ]
         super().__init__(placeholder="出走するレースを選択", options=options)
@@ -488,12 +488,17 @@ class StyleButton(discord.ui.Button):
         self.style_name = style
 
     async def callback(self, interaction: discord.Interaction):
-        horse_logic.enter_race(self.race, style=self.style_name)
+        try:
+            horse_logic.enter_race(self.race, style=self.style_name)
+        except ValueError as e:
+            await interaction.response.edit_message(content=f"⚠️ {e}", view=None)
+            return
         r = self.race
+        travel = f"\n遠征費 {r['travel']:,}万円を払いました。" if r.get('travel') else ''
         await interaction.response.edit_message(
             content=(f"✅ **{r['name']}** に出走登録しました。\n"
                      f"{r['date']} {r['course']}{r['surface']}{r['distance']}m {r['cond']}"
-                     f" ／ 脚質 **{self.style_name}**（宣言どおりになるとは限りません）"),
+                     f" ／ 脚質 **{self.style_name}**（宣言どおりになるとは限りません）{travel}"),
             view=None)
 
 
@@ -504,7 +509,8 @@ class CancelEntryView(View):
     @discord.ui.button(label="出走を取り消す", style=discord.ButtonStyle.danger)
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         horse_logic.cancel_entry()
-        await interaction.response.edit_message(content="🚫 出走登録を取り消しました。", view=None)
+        await interaction.response.edit_message(
+            content="🚫 出走登録を取り消しました。遠征費は戻しています。", view=None)
 
 
 # ====================================================

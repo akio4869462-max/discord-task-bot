@@ -61,9 +61,13 @@ def cmd_enter(args):
         print(f"⚠️ 1〜{len(races)} で指定してください。")
         return
     race = races[args.number - 1]
-    hl.enter_race(race, style=args.style)
+    try:
+        hl.enter_race(race, style=args.style)
+    except ValueError as e:
+        print(f"⚠️ {e}")
+        return
     print(f"✅ {race['name']}（{race['course']}{race['surface']}{race['distance']}m"
-          f" {race['cond']}）に登録しました。脚質 {args.style}")
+          f" {race['cond']}）に登録しました。脚質 {args.style}{hl.format_travel(race)}")
 
 
 def cmd_race(args):
@@ -146,8 +150,9 @@ def _run_sim(args):
                 _, races = hl.available_races(data, on=day)
                 if not races:
                     continue
-                # 適性に一番合うレースを選ぶ
-                race = max(races, key=lambda r: _fit(horse, r))
+                # 適性に一番合うレースを選ぶ（遠征費を払えるものの中から）
+                affordable = [r for r in races if r.get('travel', 0) <= data.get('funds', 0)]
+                race = max(affordable or races, key=lambda r: _fit(horse, r))
                 hl.enter_race(race, data=data, save=False)
                 out = hl.run_entry(data=data, today=day, save=False)
                 if out:

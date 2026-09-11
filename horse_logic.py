@@ -473,9 +473,23 @@ def available_races(data=None, on=None, now=None):
 
 
 def enter_race(race, style=None, data=None, save=True):
-    """出走を登録します。脚質はここで宣言します（意思であって確約ではない）。"""
+    """出走を登録します。脚質はここで宣言します（意思であって確約ではない）。
+
+    遠征費（race['travel']）は登録時に資金から引きます。番組表には遠征費0の地元レースが
+    必ず1本あるので、資金が無くても出走はできる。
+
+    Raises:
+        ValueError: 遠征費を払えない
+    """
     data = data if data is not None else load_stable()
     horse = data['current']
+    travel = race.get('travel', 0)
+    if travel > data.get('funds', 0):
+        raise ValueError(f"遠征費が払えません（{travel:,}万円 ／ 手元 {data.get('funds', 0):,}万円）。"
+                         f"地元（東京・中山）のレースなら遠征費はかかりません。")
+    if horse.get('entry'):
+        data['funds'] = data.get('funds', 0) + horse['entry'].get('travel', 0)   # 取り直しなら戻す
+    data['funds'] = data.get('funds', 0) - travel
     if style:
         horse['style'] = style
     horse['entry'] = dict(race)
@@ -485,7 +499,11 @@ def enter_race(race, style=None, data=None, save=True):
 
 
 def cancel_entry(data=None, save=True):
+    """出走登録を取り消し、遠征費を戻します。"""
     data = data if data is not None else load_stable()
+    entry = data['current'].get('entry')
+    if entry:
+        data['funds'] = data.get('funds', 0) + entry.get('travel', 0)
     data['current']['entry'] = None
     if save:
         save_stable(data)
@@ -1006,8 +1024,13 @@ def format_races(day, races):
         grade = f" [{r['grade']}]" if r.get('grade') else ''
         lines.append(f"{i}. **{r['name']}**{grade} "
                      f"{r['course']}{r['surface']}{r['distance']}m {r['cond']} "
-                     f"／ 1着 {r['prize']:,}万円")
+                     f"／ 1着 {r['prize']:,}万円{format_travel(r)}")
     return '\n'.join(lines)
+
+
+def format_travel(race):
+    travel = race.get('travel', 0)
+    return f" ／ 遠征費 {travel:,}万円" if travel else ' ／ 地元'
 
 
 RESULT_ROWS = 5     # 着順表に載せる上位の頭数

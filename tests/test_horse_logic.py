@@ -32,6 +32,11 @@ def grown(data, hours, today=TODAY):
     return data
 
 
+def home(races):
+    """遠征費のかからない地元のレース（番組表に必ず1本ある）。"""
+    return next(r for r in races if r.get('travel', 0) == 0)
+
+
 # ====================================================
 # 成長カーブ
 # ====================================================
@@ -305,15 +310,15 @@ def test_available_races_are_for_the_current_class():
 def test_entering_a_race_records_the_declared_style():
     data = hl.load_stable(TODAY)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], style='逃げ', data=data, save=False)
-    assert data['current']['entry']['id'] == races[0]['id']
+    hl.enter_race(home(races), style='逃げ', data=data, save=False)
+    assert data['current']['entry']['id'] == home(races)['id']
     assert data['current']['style'] == '逃げ'
 
 
 def test_cancelling_clears_the_entry():
     data = hl.load_stable(TODAY)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)
     hl.cancel_entry(data=data, save=False)
     assert data['current']['entry'] is None
 
@@ -326,14 +331,14 @@ def test_running_without_an_entry_returns_nothing():
 def test_running_a_race_updates_the_record():
     data = grown(hl.load_stable(TODAY), 12)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)
     out = hl.run_entry(data=data, today=RACE_DAY, save=False)
 
     assert 1 <= out['finish'] <= len(out['result']['horses'])
     assert data['current']['record']['starts'] == 1
     assert data['current']['entry'] is None
     assert len(data['current']['history']) == 1
-    assert data['current']['history'][0]['race'] == races[0]['name']
+    assert data['current']['history'][0]['race'] == home(races)['name']
 
 
 def test_the_same_horse_and_race_always_give_the_same_result():
@@ -345,7 +350,7 @@ def test_the_same_horse_and_race_always_give_the_same_result():
     for _ in range(2):
         data = copy.deepcopy(base)                   # 同じ馬（適性・性別も同じ）で2回走らせる
         _, races = hl.available_races(data, on=TODAY)
-        hl.enter_race(races[0], data=data, save=False)
+        hl.enter_race(home(races), data=data, save=False)
         finishes.append(hl.run_entry(data=data, today=RACE_DAY, save=False)['finish'])
     assert finishes[0] == finishes[1]
 
@@ -471,8 +476,8 @@ def raced(hours=12):
     """1レース走らせて結果を返す。"""
     data = grown(hl.load_stable(TODAY), hours)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], data=data, save=False)
-    return data, races[0], hl.run_entry(data=data, today=RACE_DAY, save=False)
+    hl.enter_race(home(races), data=data, save=False)
+    return data, home(races), hl.run_entry(data=data, today=RACE_DAY, save=False)
 
 
 def test_format_result_reports_the_finish():
@@ -539,7 +544,7 @@ def test_race_day_notice_warns_when_nothing_is_entered():
 def test_race_day_notice_confirms_the_entry():
     data = grown(hl.load_stable(TODAY), 12)
     _, races = hl.available_races(data, on=RACE_DAY)
-    hl.enter_race(races[0], data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)
 
     text = hl.format_race_day_notice(data=data, today=RACE_DAY)
 
@@ -553,7 +558,7 @@ def test_race_day_notice_flags_an_entry_left_over_from_another_day():
        今夜そのまま古いレースとして走る。黙ってそうなると面食らうので告知する。"""
     data = grown(hl.load_stable(TODAY), 12)
     _, races = hl.available_races(data, on=RACE_DAY)
-    stale = dict(races[0], date='2026-09-09')
+    stale = dict(home(races), date='2026-09-09')
     hl.enter_race(stale, data=data, save=False)
 
     text = hl.format_race_day_notice(data=data, today=RACE_DAY)
@@ -631,10 +636,10 @@ def test_weekly_summary_lists_the_races_of_the_week():
     data = grown(hl.load_stable(TODAY), 12)
     hl.get_weekly_summary(data=data, today=date(2026, 9, 7), save=False)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)
     out = hl.run_entry(data=data, today=RACE_DAY, save=False)
 
     msg = hl.get_weekly_summary(data=data, today=date(2026, 9, 14), save=False)
 
     assert '今週の出走: 1戦' in msg
-    assert races[0]['name'] in msg and f"{out['finish']}着" in msg
+    assert home(races)['name'] in msg and f"{out['finish']}着" in msg

@@ -1,7 +1,7 @@
 import subprocess
 import sys
 import zlib
-from datetime import date
+from datetime import date, timedelta
 
 from race_sim import calendar as cal
 from race_sim import engine, rivals
@@ -124,3 +124,28 @@ def test_find_recovers_a_race_by_id():
     race = cal.offers('OP', SATURDAY)[2]
     assert cal.find(race['id'], 'OP', SATURDAY) == race
     assert cal.find('存在しないid', 'OP', SATURDAY) is None
+
+
+# ====================================================
+# 遠征費
+# ====================================================
+def test_every_race_carries_its_travel_cost():
+    for race in cal.offers('1勝', SATURDAY):
+        assert race['travel'] == cal.TRAVEL_COST[race['course']]
+    assert all(cal.TRAVEL_COST[c] == 0 for c in cal.HOME_COURSES)
+
+
+def test_offers_always_include_a_home_race():
+    """⭕ 資金0でも出走できるよう、遠征費0の地元レースを必ず1本入れる。
+       遠い競馬場ばかり得意な馬でも同じ。"""
+    far_lover = {'turf': 'A', 'dirt': 'A', 'sprint': 'A', 'mile': 'A', 'middle': 'A', 'long': 'A'}
+    for cls in engine.CLASS_ORDER:
+        for i in range(30):
+            day = SATURDAY + timedelta(days=7 * i)
+            races = cal.offers(cls, day, aptitude=far_lover)
+            if races:
+                assert any(r['travel'] == 0 for r in races), (cls, day)
+
+
+def test_offers_are_still_deterministic_with_the_home_guarantee():
+    assert cal.offers('3勝', WEDNESDAY) == cal.offers('3勝', WEDNESDAY)

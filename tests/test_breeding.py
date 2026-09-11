@@ -31,6 +31,11 @@ def grown(data, hours, today=TODAY):
     return data
 
 
+def home(races):
+    """遠征費のかからない地元のレース（番組表に必ず1本ある）。"""
+    return next(r for r in races if r.get('travel', 0) == 0)
+
+
 def _pool_horse(name, sex, cls, ability, apt=None, sire='チチウマ', bms='ハハチチウマ'):
     return {'name': name, 'sex': sex, 'class': cls, 'z': 0.0,
             'params': {k: ability for k in hl.PARAMS},
@@ -270,9 +275,47 @@ def test_retired_horse_keeps_its_pedigree_for_later_matings():
 def test_prize_money_also_fills_the_stable_funds():
     data = grown(hl.load_stable(TODAY), 12)
     _, races = hl.available_races(data, on=TODAY)
-    hl.enter_race(races[0], data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)
     hl.run_entry(data=data, today=RACE_DAY, save=False)
     assert data['funds'] == data['current']['record']['prize']
+
+
+def away(races):
+    return next(r for r in races if r.get('travel', 0) > 0)
+
+
+def test_entering_an_away_race_charges_the_travel_cost():
+    data = grown(hl.load_stable(TODAY), 12)
+    data['funds'] = 1000
+    _, races = hl.available_races(data, on=TODAY)
+    race = away(races)
+
+    hl.enter_race(race, data=data, save=False)
+
+    assert data['funds'] == 1000 - race['travel']
+    assert '遠征費' in hl.format_races(TODAY, races) and '地元' in hl.format_races(TODAY, races)
+
+
+def test_entering_an_away_race_without_funds_is_refused():
+    """⭕ 番組表には地元が必ず1本あるので、断っても出走の手段は残る。"""
+    data = grown(hl.load_stable(TODAY), 12)
+    _, races = hl.available_races(data, on=TODAY)
+    with pytest.raises(ValueError, match='遠征費'):
+        hl.enter_race(away(races), data=data, save=False)
+    assert data['current']['entry'] is None and data['funds'] == 0
+    hl.enter_race(home(races), data=data, save=False)          # 地元なら通る
+
+
+def test_cancelling_or_switching_the_entry_refunds_the_travel_cost():
+    data = grown(hl.load_stable(TODAY), 12)
+    data['funds'] = 1000
+    _, races = hl.available_races(data, on=TODAY)
+    hl.enter_race(away(races), data=data, save=False)
+    hl.enter_race(home(races), data=data, save=False)          # 取り直し → 前の遠征費は戻る
+    assert data['funds'] == 1000
+    hl.enter_race(away(races), data=data, save=False)
+    hl.cancel_entry(data=data, save=False)
+    assert data['funds'] == 1000
 
 
 def test_old_data_gets_funds_from_past_prize_money():
