@@ -462,6 +462,8 @@
   const BLOCK_AHEAD = 3.0, BLOCK_BEHIND = 1.5; // この範囲に馬がいると詰まっている（馬体2.5m＋0.5m）
   const RATE_IN = 0.6, RATE_OUT = 2.2;        // 内へ寄る／外へ出る横速度[m/s]
   const GATE_HOLD_M = 150;                    // スタートからこの距離までは枠なりに走る
+  const SETTLE_M = 450;                       // ここまでが位置取り。以後は詰まらない限り横に動かない
+  const CLOSING_MIN = 0.08;                   // 0.5秒あたりこの差[m]以上速ければ「前に行きたい」
   const RAIL_MARGIN = 1.6;                    // ラチからの最小距離[m]
   const HALF = TRACK_W / 2 - RAIL_MARGIN;
   // 内側を0、外側を1とした位置 f と、走路上の横座標 lat の相互変換
@@ -477,15 +479,17 @@
     for (let s = 0; s < steps; s++) {
       const t = s * LAT_STEP;
       const d = HORSES.map(function (h) { return distanceAt(h, t); });
+      // 0.5秒前との差で速度を見る。前の馬より速いときだけ「前に行きたい」
+      const v = HORSES.map(function (h, i) { return d[i] - distanceAt(h, Math.max(0, t - 0.5)); });
       const lead = Math.max.apply(null, d);
+      const settling = lead >= GATE_HOLD_M && lead < SETTLE_M;
       const order = HORSES.map(function (_, i) { return i; }).sort(function (a, b) { return d[b] - d[a]; });
-      const placed = [];                      // {d, f} すでに位置を決めた（前を走る）馬
+      const placed = [];                      // {d, f, v} すでに位置を決めた（前を走る）馬
 
       order.forEach(function (i) {
         let target = f[i];
-        let blocked = false;                 // 詰まって避ける動きは速く、空いていて寄る動きは遅い
+        let blocked = false;
         if (lead >= GATE_HOLD_M && d[i] < DISTANCE) {
-          // 前方の窓に馬がいない、一番内側の位置を探す
           const blockers = placed.filter(function (p) {
             const gap = p.d - d[i];
             return gap > -BLOCK_BEHIND && gap < BLOCK_AHEAD;
@@ -493,29 +497,37 @@
           const free = function (cand) {
             return blockers.every(function (p) { return Math.abs(fToLat(p.f) - fToLat(cand)) >= LANE_W; });
           };
-          // まず今の位置が空いていれば、そこから内へ寄れるだけ寄る
           blocked = !free(f[i]);
+          // ⭕ 横に動くのは2つの場面だけ。それ以外は今の位置を保つ。
+          //    (1) スタート後の位置取り：枠なりから内へ寄って隊列を作る
+          //    (2) 詰まっていて、前の馬より速いとき：近いほうの空きへ出て前に行く
+          //    当初は「前が空いていれば常に内へ寄る」があり、道中ずっと横にじわじわ動いていた。
           if (!blocked) {
-            target = f[i];
-            for (let cand = f[i]; cand >= minF; cand -= 0.02) {
-              if (free(cand)) target = cand; else break;
+            if (settling) {
+              for (let cand = f[i]; cand >= minF; cand -= 0.02) {
+                if (free(cand)) target = cand; else break;
+              }
             }
           } else {
-            // 詰まっている：内外の近いほうの空きへ。同じ距離なら内を取る
-            // ⭕ 外だけを探すと、縦に連なった馬群がひたすら外へ階段状に膨らんだ
-            target = f[i];
-            let inner = null, outer = null;
-            for (let cand = f[i]; cand >= minF; cand -= 0.02) { if (free(cand)) { inner = cand; break; } }
-            for (let cand = f[i]; cand <= maxF; cand += 0.02) { if (free(cand)) { outer = cand; break; } }
-            if (inner !== null && (outer === null || f[i] - inner <= outer - f[i])) target = inner;
-            else if (outer !== null) target = outer;
+            const closing = blockers.some(function (p) { return v[i] > p.v + CLOSING_MIN; });
+            if (closing) {
+              // 内外の近いほうの空きへ。同じ距離なら内を取る
+              // ⭕ 外だけを探すと、縦に連なった馬群がひたすら外へ階段状に膨らんだ
+              let inner = null, outer = null;
+              for (let cand = f[i]; cand >= minF; cand -= 0.02) { if (free(cand)) { inner = cand; break; } }
+              for (let cand = f[i]; cand <= maxF; cand += 0.02) { if (free(cand)) { outer = cand; break; } }
+              if (inner !== null && (outer === null || f[i] - inner <= outer - f[i])) target = inner;
+              else if (outer !== null) target = outer;
+            } else {
+              blocked = false;                // 前の馬と同じ速さなら後ろで待つ
+            }
           }
         }
         const rate = (blocked ? RATE_OUT : RATE_IN) * LAT_STEP / (2 * HALF);   // f の単位に換算
         if (Math.abs(target - f[i]) <= rate) f[i] = target;
         else f[i] += target > f[i] ? rate : -rate;
         f[i] = Math.max(minF, Math.min(maxF, f[i]));
-        if (d[i] < DISTANCE) placed.push({ d: d[i], f: f[i] });   // ゴールした馬は前を塞がない
+        if (d[i] < DISTANCE) placed.push({ d: d[i], f: f[i], v: v[i] });   // ゴールした馬は前を塞がない
         table[i][s] = f[i];
       });
     }
