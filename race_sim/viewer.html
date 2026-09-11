@@ -553,22 +553,90 @@
 
   // ---- 走路 ----
   function drawGround(camD) {
-    // 芝（またはダート）の面。遠いほど明るくしてかすませる。
-    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    // ⭕ 走路だけを塗ると「走路の帯」が出ない。周囲（内馬場・外の芝生）を先に塗り、
+    //    ラチの間だけを芝／ダートの色で塗り重ねる。ダートは茶色の帯が緑の中に浮かぶ。
+    ctx.fillStyle = '#5b9457';
     ctx.fillRect(0, HORIZON_Y, W, H - HORIZON_Y);
+    drawTrackBand(camD);
 
     const fade = ctx.createLinearGradient(0, HORIZON_Y, 0, HORIZON_Y + (H - HORIZON_Y) * 0.55);
-    fade.addColorStop(0, IS_DIRT ? 'rgba(200,180,150,.55)' : 'rgba(150,190,160,.5)');
+    fade.addColorStop(0, 'rgba(170,200,175,.55)');
     fade.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = fade;
     ctx.fillRect(0, HORIZON_Y, W, H - HORIZON_Y);
 
     drawStripes(camD);
+    drawInfield(camD);
     drawRail(camD, -TRACK_W / 2);
     drawRail(camD, TRACK_W / 2);
     drawTrees(camD);
+    drawStand(camD);
     drawFurlongs(camD);
     drawFinish(camD);
+  }
+
+  /** ラチの間の走路。6mごとの四角形を奥から手前へ塗る。 */
+  function drawTrackBand(camD) {
+    ctx.fillStyle = IS_DIRT ? '#8d7150' : '#3f7a4e';
+    const step = 6;
+    for (let d = camD + 420; d > camD + 1; d -= step) {
+      const a = project(d - step, -TRACK_W / 2 - 0.3, camD), b = project(d, -TRACK_W / 2 - 0.3, camD);
+      const c = project(d, TRACK_W / 2 + 0.3, camD), e = project(d - step, TRACK_W / 2 + 0.3, camD);
+      if (!a || !b || !c || !e) continue;
+      if (Math.abs(a.x - W / 2) > W * 1.5 && Math.abs(e.x - W / 2) > W * 1.5) continue;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y + 1); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y + 1);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /** 内馬場。内ラチの向こうに生垣と、少し明るい芝。 */
+  function drawInfield(camD) {
+    const lat = INNER * (TRACK_W / 2 + 2.2);
+    ctx.fillStyle = '#2f6a3c';
+    for (let d = camD + 400; d > camD + 3; d -= 8) {
+      const a = project(d - 8, lat, camD), b = project(d, lat, camD);
+      if (!a || !b) continue;
+      if (Math.abs(a.x - W / 2) > W * 1.5) continue;
+      const hA = 0.9 * a.k, hB = 0.9 * b.k;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(b.x, b.y - hB); ctx.lineTo(a.x, a.y - hA);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /** ホームストレッチの外側のスタンド。奥から手前へ、20mごとのブロックを積む。 */
+  function drawStand(camD) {
+    const from = DISTANCE - HOME - 40, to = DISTANCE + 80;
+    const lat = -INNER * (TRACK_W / 2 + 16);     // 走路から少し引いて、手前の馬に被らないように
+    const seg = 20;
+    for (let d = Math.min(to, camD + 420); d > Math.max(from, camD + 8); d -= seg) {
+      const near = project(Math.max(d - seg, from), lat, camD), far = project(d, lat, camD);
+      if (!near || !far) continue;
+      if (Math.abs(near.x - W / 2) > W * 1.6) continue;
+      const hN = 13 * near.k, hF = 13 * far.k;
+      // 本体
+      ctx.fillStyle = '#c9cfd3';
+      ctx.beginPath();
+      ctx.moveTo(near.x, near.y); ctx.lineTo(far.x, far.y); ctx.lineTo(far.x, far.y - hF); ctx.lineTo(near.x, near.y - hN);
+      ctx.closePath(); ctx.fill();
+      // 観客席（段々の帯）
+      const tiers = ['#6f7a86', '#8a94a0', '#a3acb6'];
+      tiers.forEach(function (color, i) {
+        const y0 = 0.25 + i * 0.2, y1 = y0 + 0.16;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(near.x, near.y - hN * y0); ctx.lineTo(far.x, far.y - hF * y0);
+        ctx.lineTo(far.x, far.y - hF * y1); ctx.lineTo(near.x, near.y - hN * y1);
+        ctx.closePath(); ctx.fill();
+      });
+      // 屋根
+      ctx.fillStyle = '#3d4750';
+      ctx.beginPath();
+      ctx.moveTo(near.x, near.y - hN); ctx.lineTo(far.x, far.y - hF);
+      ctx.lineTo(far.x, far.y - hF * 1.08); ctx.lineTo(near.x, near.y - hN * 1.08);
+      ctx.closePath(); ctx.fill();
+    }
   }
 
   function drawStripes(camD) {
@@ -589,27 +657,32 @@
   }
 
   function drawRail(camD, lat) {
-    ctx.strokeStyle = 'rgba(245,248,243,.95)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    let started = false;
-    for (let d = camD + 2; d < camD + 420; d += 6) {
-      const p = project(d, lat, camD);
-      if (!p) continue;
-      if (Math.abs(p.x - W / 2) > W * 1.5) break;
-      const top = p.y - 1.15 * p.k;         // ラチの高さ 1.15m
-      if (!started) { ctx.moveTo(p.x, top); started = true; } else ctx.lineTo(p.x, top);
-    }
-    ctx.stroke();
+    // 上段・下段の2本。手前ほど太い
+    [1.15, 0.6].forEach(function (height, row) {
+      ctx.strokeStyle = row === 0 ? 'rgba(245,248,243,.95)' : 'rgba(245,248,243,.7)';
+      ctx.lineWidth = row === 0 ? 2.5 : 1.6;
+      ctx.beginPath();
+      let started = false;
+      for (let d = camD + 2; d < camD + 420; d += 6) {
+        const p = project(d, lat, camD);
+        if (!p) continue;
+        if (Math.abs(p.x - W / 2) > W * 1.5) break;
+        const top = p.y - height * p.k;
+        if (!started) { ctx.moveTo(p.x, top); started = true; } else ctx.lineTo(p.x, top);
+      }
+      ctx.stroke();
+    });
 
-    ctx.fillStyle = 'rgba(245,248,243,.8)';
     const step = 12;
     const first = Math.ceil((camD + 4) / step) * step;
     for (let d = first; d < camD + 400; d += step) {
       const p = project(d, lat, camD);
       if (!p) continue;
       if (Math.abs(p.x - W / 2) > W * 1.5) break;
-      ctx.fillRect(p.x - 0.09 * p.k, p.y - 1.15 * p.k, 0.18 * p.k, 1.15 * p.k);
+      ctx.fillStyle = 'rgba(0,0,0,.18)';                                   // 支柱の影
+      ctx.fillRect(p.x - 0.06 * p.k, p.y - 0.05 * p.k, 0.5 * p.k, 0.1 * p.k);
+      ctx.fillStyle = 'rgba(245,248,243,.85)';
+      ctx.fillRect(p.x - 0.06 * p.k, p.y - 1.2 * p.k, 0.12 * p.k, 1.2 * p.k);
     }
   }
 
@@ -618,6 +691,7 @@
     const step = 45;
     const first = Math.floor(camD / step) * step;
     for (let d = first + step * 8; d > camD + 6; d -= step) {
+      if (d > DISTANCE - HOME - 40 && d < DISTANCE + 80) continue;     // スタンドの区間
       const p = project(d, -INNER * (TRACK_W / 2 + 14), camD);
       // ⭕ 近すぎる木は巨大になって走路に生えて見えるので描かない。
       if (!p || p.depth < 26 || p.x < -200 || p.x > W + 200) continue;
