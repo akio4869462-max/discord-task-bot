@@ -410,7 +410,7 @@ def load_stable(today=None):
         if data['horses']:
             data['main'] = data['selected'] = data['horses'][0]['id']
     data.pop('current', None)
-    fill_stable(data, today)                  # 多頭化前のデータは3頭まで埋める（一度だけ）
+    filled = fill_stable(data, today)         # 多頭化前のデータは3頭まで埋める（一度だけ）
     for horse in data['horses']:
         horse.setdefault('generation', data.get('generation', 1))
         horse.setdefault('entry', None)
@@ -440,7 +440,12 @@ def load_stable(today=None):
         s.setdefault('id', source.get('id') or str(uuid.uuid4()))
         s['pedigree'] = _migrate_pedigree(s.get('pedigree') or source.get('pedigree'))
         s.setdefault('line', source.get('line') or line_of(s))
-    return _bind(data)
+    _bind(data)
+    # ⭕ 読み込み時に新しく作った馬（IDが乱数）は、ここで保存しないと読むたびに別の馬になる。
+    #    実際に、セレクトのIDと次の読み込みのIDが食い違って「その馬はいません」になった。
+    if filled:
+        save_stable(data)
+    return data
 
 
 def save_stable(data):

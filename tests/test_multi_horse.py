@@ -64,9 +64,12 @@ def test_single_horse_data_is_migrated_into_horses_on_load():
     assert data['main'] == data['selected'] == horse['id']
     assert data['current']['name'] == 'キュウウマ'
     assert data['current']['generation'] == 3
-    hl.save_stable(data)
-    data['horses'].pop()
-    hl.save_stable(data)
+    # ⭕ 埋めた馬はその場で保存される。保存しないと読むたびに別のIDの馬になり、
+    #    セレクトで選んだIDが見つからず「その馬はいません」になった（本番で実際に起きた）
+    again = hl.load_stable(TODAY)
+    assert [h['id'] for h in again['horses']] == [h['id'] for h in data['horses']]
+    again['horses'].pop()
+    hl.save_stable(again)
     assert len(hl.load_stable(TODAY)['horses']) == hl.MAX_HORSES - 1     # 2回目は埋めない
 
 
