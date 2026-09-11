@@ -37,6 +37,13 @@ def home(races):
     return next(r for r in races if r.get('travel', 0) == 0)
 
 
+def solo(data):
+    """厩舎を1頭にする（新規の厩舎は3頭で始まるので、1頭の挙動を見るテスト用）。"""
+    data['horses'] = data['horses'][:1]
+    hl._bind(data)
+    return data
+
+
 # ====================================================
 # 成長カーブ
 # ====================================================
@@ -532,7 +539,7 @@ def test_race_day_notice_is_silent_on_a_non_race_day():
 
 def test_race_day_notice_warns_when_nothing_is_entered():
     """⭕ レースは20:00に自動で走るので、登録忘れに気づく手段がこれしか無い。"""
-    data = grown(hl.load_stable(TODAY), 12)
+    data = grown(solo(hl.load_stable(TODAY)), 12)
     text = hl.format_race_day_notice(data=data, today=RACE_DAY)
 
     assert '出走登録がありません' in text
@@ -542,7 +549,7 @@ def test_race_day_notice_warns_when_nothing_is_entered():
 
 
 def test_race_day_notice_confirms_the_entry():
-    data = grown(hl.load_stable(TODAY), 12)
+    data = grown(solo(hl.load_stable(TODAY)), 12)
     _, races = hl.available_races(data, on=RACE_DAY)
     hl.enter_race(home(races), data=data, save=False)
 

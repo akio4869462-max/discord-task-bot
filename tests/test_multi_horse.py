@@ -29,14 +29,24 @@ def home(races):
     return next(r for r in races if r.get('travel', 0) == 0)
 
 
+def solo():
+    """1頭だけの厩舎（新規は3頭で始まるので、増やす挙動を見るテスト用）。"""
+    data = hl.load_stable(TODAY)
+    data['horses'] = data['horses'][:1]
+    hl._bind(data)
+    return data
+
+
 # ====================================================
 # データ構造と読み込み
 # ====================================================
-def test_new_stable_has_one_main_horse_bound_to_current():
+def test_new_stable_starts_with_three_horses_main_first():
+    """⭕ 最初から3頭。能力は低くていいから頭数が欲しい、という要望。"""
     data = hl.load_stable(TODAY)
-    assert len(data['horses']) == 1
+    assert len(data['horses']) == hl.MAX_HORSES
     assert data['current'] is data['horses'][0]
     assert data['main'] == data['selected'] == data['current']['id']
+    assert data['stable_filled'] is True
 
 
 def test_single_horse_data_is_migrated_into_horses_on_load():
@@ -49,14 +59,19 @@ def test_single_horse_data_is_migrated_into_horses_on_load():
 
     data = hl.load_stable(TODAY)
 
-    assert [h['name'] for h in data['horses']] == ['キュウウマ']
+    # 主戦は元の馬のまま、3頭まで埋まる（一度だけ）
+    assert data['horses'][0]['name'] == 'キュウウマ' and len(data['horses']) == hl.MAX_HORSES
     assert data['main'] == data['selected'] == horse['id']
     assert data['current']['name'] == 'キュウウマ'
     assert data['current']['generation'] == 3
+    hl.save_stable(data)
+    data['horses'].pop()
+    hl.save_stable(data)
+    assert len(hl.load_stable(TODAY)['horses']) == hl.MAX_HORSES - 1     # 2回目は埋めない
 
 
 def test_save_drops_the_current_alias_and_reload_rebinds():
-    data = hl.load_stable(TODAY)
+    data = solo()
     add_horse(data, 'ニトウメ')
     hl.select_horse(data, data['horses'][1]['id'])
     with open(hl.STABLE_FILE, encoding='utf-8') as f:
@@ -69,7 +84,7 @@ def test_save_drops_the_current_alias_and_reload_rebinds():
 
 
 def test_select_and_main_are_independent():
-    data = hl.load_stable(TODAY)
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     hl.select_horse(data, second['id'], save=False)
@@ -84,7 +99,7 @@ def test_select_and_main_are_independent():
 # 調教：主戦に全部、併せ馬に半分
 # ====================================================
 def test_training_goes_fully_to_the_main_and_half_to_the_others():
-    data = hl.load_stable(TODAY)
+    data = solo()
     main = data['horses'][0]
     sub = add_horse(data, 'アワセウマ')
     hl.select_horse(data, sub['id'], save=False)          # 見ているのは併せ馬でも
@@ -95,7 +110,7 @@ def test_training_goes_fully_to_the_main_and_half_to_the_others():
 
 
 def test_backfill_also_feeds_the_sub_horses():
-    data = hl.load_stable(TODAY)
+    data = solo()
     sub = add_horse(data, 'アワセウマ')
     hl.backfill('typing', [date(2026, 9, 8), date(2026, 9, 9)], data=data, save=False)
     assert sub['growth']['dash'] == pytest.approx(hl.TYPING_MINUTES * 2 * 0.7 * hl.SUB_SHARE)
@@ -105,7 +120,7 @@ def test_backfill_also_feeds_the_sub_horses():
 # 出走：馬ごとに登録、同じレースは不可、夜に全馬走る
 # ====================================================
 def test_each_horse_enters_its_own_race_and_the_same_race_is_refused():
-    data = hl.load_stable(TODAY)
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     day, races = hl.available_races(data, on=TODAY, horse=first)
@@ -118,7 +133,7 @@ def test_each_horse_enters_its_own_race_and_the_same_race_is_refused():
 
 
 def test_run_entries_runs_every_entered_horse_main_first():
-    data = hl.load_stable(TODAY)
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     hl.set_main(data, second['id'], save=False)
@@ -135,35 +150,51 @@ def test_run_entries_runs_every_entered_horse_main_first():
     assert hl.run_entries(data=data, today=RACE_DAY, save=False) == []
 
 
-def test_retirement_replaces_the_horse_in_place_and_hands_over_main():
-    data = hl.load_stable(TODAY)
+def test_sub_with_a_breeding_plan_is_replaced_by_its_foal():
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     hl.select_horse(data, second['id'], save=False)
     second['record']['starts'] = hl.RETIRE_STARTS
     second['slots'] = hl.RETIRE_STARTS
     second['generation'] = 2
+    partner = dict(first, sex='牡' if second['sex'] == '牝' else '牝')
+    second['breeding_plan'] = {'partner': partner, 'fee': 0, 'foal_name': 'ヨヤクノコ'}
 
     hl.retire(data, RACE_DAY, horse=second)
 
     assert len(data['horses']) == 2
     foal = data['horses'][1]
-    assert foal['id'] != second['id'] and foal['generation'] == 3
+    assert foal['name'] == 'ヨヤクノコ' and foal['generation'] == 3
     assert data['selected'] == foal['id'] and data['current'] is foal
     assert data['main'] == first['id']                                 # 主戦は替わらない
     assert data['retired'][0]['name'] == 'ニトウメ'
 
-    hl.set_main(data, foal['id'], save=False)
-    foal['slots'] = hl.RETIRE_STARTS
-    hl.retire(data, RACE_DAY, horse=foal)
-    assert data['main'] == data['horses'][1]['id']                     # 主戦が引退すれば仔が継ぐ
+
+def test_sub_without_a_plan_frees_its_slot_but_main_always_continues():
+    """⭕ 全部に仔を置くとセリの出番が来ない。予約の無い併せ馬は引退で枠が空く。"""
+    data = solo()
+    first = data['horses'][0]
+    second = add_horse(data, 'ニトウメ')
+    hl.select_horse(data, second['id'], save=False)
+    second['slots'] = hl.RETIRE_STARTS
+
+    msg = hl.retire(data, RACE_DAY, horse=second)
+
+    assert '枠が空きました' in msg
+    assert [h['id'] for h in data['horses']] == [first['id']]
+    assert data['selected'] == first['id'] and data['current'] is first
+
+    first['slots'] = hl.RETIRE_STARTS
+    hl.retire(data, RACE_DAY, horse=first)                              # 主戦は予約が無くても仔が継ぐ
+    assert len(data['horses']) == 1 and data['main'] == data['horses'][0]['id']
 
 
 # ====================================================
 # セリ
 # ====================================================
 def test_auction_lists_six_foals_and_is_fixed_within_the_week():
-    data = hl.load_stable(TODAY)
+    data = solo()
     lots = hl.auction(data, TODAY)
     assert len(lots) == hl.AUCTION_SIZE
     assert all(lot['price'] > 0 and lot['foal']['growth_type'] in hl.GROWTH_TYPES for lot in lots)
@@ -172,7 +203,7 @@ def test_auction_lists_six_foals_and_is_fixed_within_the_week():
 
 
 def test_buying_a_foal_adds_a_sub_horse_and_charges():
-    data = hl.load_stable(TODAY)
+    data = solo()
     data['funds'] = 1_000_000
     lot = hl.auction(data, TODAY)[0]
 
@@ -185,7 +216,7 @@ def test_buying_a_foal_adds_a_sub_horse_and_charges():
 
 
 def test_buying_is_refused_when_full_or_broke():
-    data = hl.load_stable(TODAY)
+    data = solo()
     data['funds'] = 0
     lot = hl.auction(data, TODAY)[0]
     with pytest.raises(ValueError, match='資金'):
@@ -201,14 +232,14 @@ def test_buying_is_refused_when_full_or_broke():
 # 表示
 # ====================================================
 def test_stable_view_marks_the_role_and_lists_the_others():
-    data = hl.load_stable(TODAY)
+    data = solo()
     add_horse(data, 'アワセウマ')
     text = hl.format_horse(data, TODAY)
     assert '・主戦）' in text and '他の馬' in text and 'アワセウマ（未勝利・併せ馬）' in text
 
 
 def test_race_day_notice_covers_every_horse():
-    data = hl.load_stable(TODAY)
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     _, races = hl.available_races(data, on=RACE_DAY, horse=first)
@@ -219,7 +250,7 @@ def test_race_day_notice_covers_every_horse():
 
 
 def test_weekly_summary_lists_races_of_every_horse():
-    data = hl.load_stable(TODAY)
+    data = solo()
     first = data['horses'][0]
     second = add_horse(data, 'ニトウメ')
     for h in (first, second):

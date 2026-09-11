@@ -259,18 +259,33 @@ def new_horse(name=None, growth=None, pedigree=None, sex=None, today=None, rng=N
 
 
 def _default_stable(today=None):
-    horse = new_horse(today=today)
+    # ⭕ 最初から3頭。能力は低くていいから頭数が欲しい、という要望。主戦は1頭目
+    horses = [new_horse(today=today) for _ in range(MAX_HORSES)]
     return _bind({
         'generation': 1,
-        'horses': [horse],
-        'main': horse['id'],
-        'selected': horse['id'],
+        'horses': horses,
+        'main': horses[0]['id'],
+        'selected': horses[0]['id'],
         'retired': [],
         'stallions': [],
         'funds': 0,
         'last_active_date': None,
         'current_streak': 0,
+        'stable_filled': True,
     })
+
+
+def fill_stable(data, today=None):
+    """厩舎を MAX_HORSES 頭まで埋めます（一度だけ）。多頭化前のデータの読み替え用。"""
+    if data.get('stable_filled'):
+        return []
+    added = []
+    while len(data['horses']) < MAX_HORSES:
+        h = new_horse(today=today)
+        data['horses'].append(h)
+        added.append(h)
+    data['stable_filled'] = True
+    return added
 
 
 def _bind(data):
@@ -395,6 +410,7 @@ def load_stable(today=None):
         if data['horses']:
             data['main'] = data['selected'] = data['horses'][0]['id']
     data.pop('current', None)
+    fill_stable(data, today)                  # 多頭化前のデータは3頭まで埋める（一度だけ）
     for horse in data['horses']:
         horse.setdefault('generation', data.get('generation', 1))
         horse.setdefault('entry', None)
@@ -847,6 +863,20 @@ def retire(data, today=None, save=False, horse=None):
     parent = horse['name']
     generation = horse.get('generation', 1) + 1
     data['generation'] = max(data.get('generation', 1), generation)
+
+    # ⭕ 配合予約の無い併せ馬は、引退したら枠が空く。全部に仔を置くとセリの出番が来ない。
+    #    主戦だけは（予約が無くても）必ず仔が継ぐ。
+    if not plan and not is_main(data, horse):
+        data['horses'] = [h for h in data['horses'] if h['id'] != horse['id']]
+        if data.get('selected') == horse['id']:
+            data['selected'] = data['main']
+        _bind(data)
+        if save:
+            save_stable(data)
+        return (f"🎓 {parent} が{RETIRE_STARTS}戦を走り切って引退しました。"
+                f"配合の予約が無かったので枠が空きました（{len(data['horses'])}/{MAX_HORSES}頭）。"
+                f"セリか配合で補充できます。")
+
     if plan:
         foal = breed(horse, plan['partner'], name=plan.get('foal_name'), today=today, rng=rng)
         tags = foal.get('blood', {}).get('tags', [])
