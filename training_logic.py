@@ -12,94 +12,38 @@ from datetime import datetime, timedelta, timezone
 TRAINING_DATA_FILE = os.path.join('data', 'training_data.json')
 JST = timezone(timedelta(hours=9))
 
-TRAINING_ASSETS_DIR = os.path.join('assets', 'training')
 
-
-def _images(prefix, count):
-    """指定した接頭辞の分割画像ファイルパスをcount枚分のリストで返します。"""
-    return [os.path.join(TRAINING_ASSETS_DIR, f'{prefix}_{i}.png') for i in range(1, count + 1)]
-
-
-# 【週間メニューの定義】datetime.weekday() は月曜=0〜日曜=6
-WEEKLY_MENU = {
-    0: {
-        "name": "上半身①（胸・肩・二の腕）",
-        "images": _images('upper1', 3),
-        "exercises": [
-            "ダンベルベンチプレス（床でも可） 4×8〜10",
-            "ダンベルショルダープレス 3×10",
-            "サイドレイズ 3×15",
-            "アーノルドプレス 3×10",
-            "ダンベルカール 3×12",
-            "トライセプスエクステンション 3×12",
-        ],
-    },
-    1: {
-        "name": "下半身・臀部",
-        "images": _images('lower', 2),
-        "exercises": [
-            "ダンベルスクワット 4×12",
-            "ブルガリアンスクワット（片足、ベンチ使用） 3×10（各脚）",
-            "ルーマニアンデッドリフト 4×10",
-            "ダンベルランジ 3×12（各脚）",
-            "カーフレイズ 3×20",
-        ],
-    },
-    2: {
-        "name": "体幹サーキット（脂肪燃焼）",
-        "images": _images('circuit', 2),
-        "exercises": [
-            "【サーキット】休憩30〜45秒で3〜4周（合計20〜25分）",
-            "ダンベルスラスター 10回",
-            "マウンテンクライマー 30秒",
-            "ダンベルスイング（片手ずつ） 15回（各側）",
-            "プランク 40秒",
-            "バーピー 10回",
-        ],
-    },
-    3: {
-        "name": "上半身②（背中・肩）",
-        "images": _images('upper2', 2),
-        "exercises": [
-            "ワンハンドダンベルロウ 4×10（各側）",
-            "ダンベルデッドリフト 3×10",
-            "リアレイズ 3×15",
-            "シュラッグ 3×15",
-            "ダンベルプルオーバー 3×12",
-        ],
-    },
-    4: {
-        "name": "下半身・臀部",
-        "images": _images('lower', 2),
-        "exercises": [
-            "ダンベルスクワット 4×12",
-            "ブルガリアンスクワット（片足、ベンチ使用） 3×10（各脚）",
-            "ルーマニアンデッドリフト 4×10",
-            "ダンベルランジ 3×12（各脚）",
-            "カーフレイズ 3×20",
-        ],
-    },
-    5: {
-        "name": "体幹サーキット（脂肪燃焼）",
-        "images": _images('circuit', 2),
-        "exercises": [
-            "【サーキット】休憩30〜45秒で3〜4周（合計20〜25分）",
-            "ダンベルスラスター 10回",
-            "マウンテンクライマー 30秒",
-            "ダンベルスイング（片手ずつ） 15回（各側）",
-            "プランク 40秒",
-            "バーピー 10回",
-        ],
-    },
-    6: None,  # 日曜：休養日
+# 【毎日のメニューの定義】月〜土は全て同じ内容（お風呂前の脂肪燃焼＆筋力アップ習慣）。
+# 曜日ごとに分けていた頃の筋肉部位ローテーションはやめ、毎日続けられる短時間サーキットに統一した。
+_DAILY_MENU = {
+    "name": "全身サーキット（脂肪燃焼＆筋力アップ）",
+    "images": [],  # 旧種目（ダンベル等）の画像しか無く一致しないため、新しい画像ができるまでテキストのみ
+    "exercises": [
+        "【ウォームアップ】",
+        "アームサークル 1分",
+        "トルソーツイスト 1分",
+        "その場ジョギング 2分",
+        "【メインサーキット】休憩60秒で3周",
+        "スクワット 15回",
+        "フォワードランジ 20回",
+        "前腕プランク 45秒",
+        "【クールダウン】",
+        "アームサークル 2分（深呼吸をしながら）",
+    ],
 }
 
-# 休養日以外、毎回のトレーニング後に行う腹筋メニュー
-AB_FINISHER = [
-    "プランク 40秒 × 2",
-    "レッグレイズ 15回 × 2",
-    "ロシアンツイスト（ダンベルを持って） 20回 × 2",
-]
+# datetime.weekday() は月曜=0〜日曜=6
+# 平日勤務・土日休みのため、トレーニングはむしろ休みの土日に行いたい。
+# 平日の中で疲労が溜まりやすい月曜を休養日にする。
+WEEKLY_MENU = {
+    0: None,  # 月曜：休養日
+    1: _DAILY_MENU,
+    2: _DAILY_MENU,
+    3: _DAILY_MENU,
+    4: _DAILY_MENU,
+    5: _DAILY_MENU,
+    6: _DAILY_MENU,
+}
 
 # 節目に達した「その日」だけ公開告知するための一覧
 TRAINING_STREAK_MILESTONES = [3, 7, 14, 30]
@@ -156,9 +100,6 @@ def get_today_menu(weekday=None):
     msg = f"💪 **【今日のトレーニング】{menu['name']}**\n"
     for line in menu['exercises']:
         msg += f"・{line}\n"
-    msg += "\n🔥 **仕上げ（毎回）**\n"
-    for line in AB_FINISHER:
-        msg += f"・{line}\n"
     return msg
 
 
@@ -178,9 +119,9 @@ def get_today_menu_image_paths(weekday=None):
 
 
 def _previous_scheduled_date(from_date):
-    """指定日の「前回のトレーニング予定日」を求めます（日曜は休養日として飛ばす）。"""
+    """指定日の「前回のトレーニング予定日」を求めます（休養日は飛ばす）。"""
     prev_date = from_date - timedelta(days=1)
-    if prev_date.weekday() == 6:
+    if is_rest_day(prev_date.weekday()):
         prev_date -= timedelta(days=1)
     return prev_date
 
@@ -188,7 +129,7 @@ def _previous_scheduled_date(from_date):
 def _update_streak(data, today):
     """トレーニング記録の連続日数を更新します。
 
-    日曜（休養日）は記録が無くても連続記録を途切れさせません。
+    休養日は記録が無くても連続記録を途切れさせません。
     """
     today_str = today.strftime('%Y-%m-%d')
     expected_prev_str = _previous_scheduled_date(today).strftime('%Y-%m-%d')
@@ -295,7 +236,7 @@ def get_measurement_history(limit=10):
 
 
 def get_weekly_training_rate(today=None):
-    """直近7日間のトレーニング実施率を算出します（週間サマリー用、日曜は予定日数に含めない）。
+    """直近7日間のトレーニング実施率を算出します（週間サマリー用、休養日は予定日数に含めない）。
 
     Args:
         today (date, optional): 基準日（省略時は今日。テスト用の注入口）。
@@ -311,7 +252,7 @@ def get_weekly_training_rate(today=None):
     completed_days = 0
     for i in range(7):
         day = today - timedelta(days=i)
-        if day.weekday() == 6:
+        if is_rest_day(day.weekday()):
             continue
         scheduled_days += 1
         if day.strftime('%Y-%m-%d') in session_dates:

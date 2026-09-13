@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timedelta
 
 import pytest
@@ -18,30 +17,30 @@ assert TUESDAY.weekday() == 1
 
 
 def test_get_today_menu_matches_weekly_schedule():
-    assert '上半身①' in tl.get_today_menu(weekday=0)
-    assert '下半身' in tl.get_today_menu(weekday=1)
-    assert 'サーキット' in tl.get_today_menu(weekday=2)
-    assert '上半身②' in tl.get_today_menu(weekday=3)
-    assert '下半身' in tl.get_today_menu(weekday=4)
-    assert 'サーキット' in tl.get_today_menu(weekday=5)
+    """火〜日（月曜以外）は毎日同じ全身サーキットメニュー。"""
+    for weekday in range(1, 7):
+        assert 'サーキット' in tl.get_today_menu(weekday=weekday)
 
 
 def test_get_today_menu_rest_day():
-    result = tl.get_today_menu(weekday=6)
+    result = tl.get_today_menu(weekday=0)
     assert '休養日' in result
 
 
-def test_get_today_menu_includes_ab_finisher_on_training_day():
-    result = tl.get_today_menu(weekday=0)
+def test_get_today_menu_does_not_duplicate_ab_finisher():
+    """メインサーキットに前腕プランクが含まれるため、仕上げ（AB_FINISHER）は廃止した。
+    復活すると前腕プランクと内容が重複するため、出てこないことを固定しておく。"""
+    result = tl.get_today_menu(weekday=1)
     assert 'プランク' in result
-    assert 'レッグレイズ' in result
+    assert 'レッグレイズ' not in result
+    assert '仕上げ' not in result
 
 
 def test_log_session_on_rest_day_does_not_record():
-    sunday = datetime(2026, 6, 7, 10, 0, tzinfo=tl.JST)
-    assert sunday.weekday() == 6
+    monday = datetime(2026, 6, 1, 10, 0, tzinfo=tl.JST)
+    assert monday.weekday() == 0
 
-    msg, streak = tl.log_session(now=sunday)
+    msg, streak = tl.log_session(now=monday)
 
     assert '休養日' in msg
     assert streak is None
@@ -55,7 +54,7 @@ def test_log_session_records_and_starts_streak_at_1():
     assert streak == 1
     data = tl.load_training_data()
     assert len(data['sessions']) == 1
-    assert data['sessions'][0]['day_type'] == '下半身・臀部'
+    assert data['sessions'][0]['day_type'] == '全身サーキット（脂肪燃焼＆筋力アップ）'
 
 
 def test_log_session_twice_on_same_day_does_not_duplicate():
@@ -68,16 +67,15 @@ def test_log_session_twice_on_same_day_does_not_duplicate():
 
 
 def test_streak_continues_across_planned_rest_day():
-    # 前週の土曜にトレーニング済みの状態を用意
-    this_monday = TUESDAY - timedelta(days=1)
-    last_saturday = this_monday - timedelta(days=2)
+    # 前日(月曜・休養日)の前の日曜にトレーニング済みの状態を用意
+    last_sunday = TUESDAY - timedelta(days=2)
     data = tl.load_training_data()
-    data['last_active_date'] = last_saturday.strftime('%Y-%m-%d')
+    data['last_active_date'] = last_sunday.strftime('%Y-%m-%d')
     data['current_streak'] = 5
     tl.save_training_data(data)
 
-    # 日曜(休養日)を挟んで月曜にトレーニングしても、連続記録が途切れない
-    _, streak = tl.log_session(now=this_monday)
+    # 月曜(休養日)を挟んで火曜にトレーニングしても、連続記録が途切れない
+    _, streak = tl.log_session(now=TUESDAY)
     assert streak == 6
 
 
@@ -133,10 +131,10 @@ def test_get_measurement_history_lists_records():
     assert '80.0cm' in result
 
 
-def test_weekly_training_rate_excludes_sunday_from_scheduled_days():
-    today = TUESDAY.date()  # 火曜基準で直近7日間 = 前週水〜今週火（日曜が1日含まれる）
+def test_weekly_training_rate_excludes_monday_from_scheduled_days():
+    today = TUESDAY.date()  # 火曜基準で直近7日間 = 前週水〜今週火（月曜が1日含まれる）
     completed, scheduled = tl.get_weekly_training_rate(today=today)
-    assert scheduled == 6  # 7日間のうち日曜1日を除いた6日
+    assert scheduled == 6  # 7日間のうち月曜1日を除いた6日
     assert completed == 0
 
 
@@ -147,20 +145,22 @@ def test_weekly_training_rate_counts_completed_sessions():
 
 
 def test_get_today_menu_image_paths_returns_empty_on_rest_day():
-    assert tl.get_today_menu_image_paths(weekday=6) == []
-
-
-def test_get_today_menu_image_paths_returns_existing_files_for_training_day():
-    paths = tl.get_today_menu_image_paths(weekday=0)
-    assert len(paths) == 3  # upper1は3枚に分割済み
-    assert all(os.path.exists(p) for p in paths)
-
-
-def test_get_today_menu_image_paths_excludes_missing_files(monkeypatch):
-    monkeypatch.setitem(tl.WEEKLY_MENU[0], 'images', ['assets/training/does_not_exist.png'])
     assert tl.get_today_menu_image_paths(weekday=0) == []
 
+
+def test_get_today_menu_image_paths_returns_empty_when_no_images_configured():
+    """新メニューは一致する画像がまだ無いため、デフォルトでは空リスト。"""
+    assert tl.get_today_menu_image_paths(weekday=1) == []
+
+
+def test_get_today_menu_image_paths_filters_out_missing_files(tmp_path, monkeypatch):
+    existing = tmp_path / 'exists.png'
+    existing.write_bytes(b'')
+    monkeypatch.setitem(tl.WEEKLY_MENU[1], 'images', [str(existing), str(tmp_path / 'does_not_exist.png')])
+
+    assert tl.get_today_menu_image_paths(weekday=1) == [str(existing)]
+
 def test_is_rest_day():
-    assert tl.is_rest_day(weekday=6) is True
-    for wd in range(6):
+    assert tl.is_rest_day(weekday=0) is True
+    for wd in range(1, 7):
         assert tl.is_rest_day(weekday=wd) is False
