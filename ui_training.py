@@ -22,7 +22,9 @@ class TrainingMenuView(View):
     @discord.ui.button(label="💪 今日のメニュー", style=discord.ButtonStyle.success, row=0)
     async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         image_paths = training_logic.get_today_menu_image_paths()
-        files = [discord.File(p) for p in image_paths] if image_paths else None
+        # ⭕ files=None を明示的に渡すとdiscord.py側で例外になる（休養日など画像が無い日に発生）。
+        #    空リストなら「添付なし」として正しく扱われる。
+        files = [discord.File(p) for p in image_paths]
         await interaction.response.send_message(training_logic.get_today_menu(), files=files, ephemeral=True)
 
     @discord.ui.button(label="✅ 完了を記録", style=discord.ButtonStyle.primary, row=0)
@@ -92,7 +94,9 @@ async def send_training_notification(channel):
     image_paths = training_logic.get_today_menu_image_paths()
     # 休養日は記録するものが無いのでボタンを出さない
     log_view = None if training_logic.is_rest_day() else DailyLogView()
-    files = [discord.File(p) for p in image_paths] if image_paths else None
+    # ⭕ files=None を明示的に渡すとdiscord.py側で例外になる（休養日など画像が無い日に発生）。
+    #    空リストなら「添付なし」として正しく扱われる。
+    files = [discord.File(p) for p in image_paths]
     await channel.send(training_logic.get_today_menu(), files=files, view=log_view)
 
 
