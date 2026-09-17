@@ -52,6 +52,9 @@ BACKUP_CHANNEL_ID = getenv_int('BACKUP_CHANNEL_ID', TASK_CHANNEL_ID)
 BACKUP_TIME = time(8, 10, tzinfo=JST)
 FOCUS_TIMER_SECONDS = 1500
 
+# 可観測性MVP：異常時のアラート送り先。未設定ならタスク用チャンネルへ送る
+ALERT_CHANNEL_ID = getenv_int('ALERT_CHANNEL_ID', TASK_CHANNEL_ID)
+
 # タスク完了時に獲得できる疑似作業時間（15分 = 150 EXP）
 TASK_COMPLETE_MINUTES = 15
 

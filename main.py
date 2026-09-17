@@ -11,6 +11,7 @@ from discord.ext import tasks
 from discord.ui import View
 
 import exam_logic
+import heartbeat_logic
 import horse_logic
 import news_logic
 import task_logic
@@ -20,7 +21,7 @@ import typing_logic
 # ⭕ bot_stateがclient/treeを保持する。以降のui_*.pyはこれをimportして
 # 同じclient/treeにコマンドやイベントを登録する（循環importを避けるための構成）。
 from race_sim import calendar as race_calendar
-from bot_state import client, tree, getenv_int, TOKEN, JST, DELIVERY_TIMES, NEWS_CHANNEL_ID, TASK_CHANNEL_ID
+from bot_state import client, tree, getenv_int, TOKEN, JST, DELIVERY_TIMES, NEWS_CHANNEL_ID, TASK_CHANNEL_ID, ALERT_CHANNEL_ID
 
 # ui_common の関数は tests/test_main.py から main.X として参照され続けるため、
 # ここで再エクスポートする（実体はui_common.py側にある）。
@@ -74,6 +75,50 @@ def build_deadline_reminders(today_jst):
             reminders.append(f"⚠️ **あと {days_left} 日**: [{cat_text}] {item['task']}")
 
     return reminders
+
+
+# ====================================================
+# 💓 ハートビート（生存確認）
+# ====================================================
+@tasks.loop(minutes=5)
+async def heartbeat_task():
+    """Botが生きている印として、5分おきに時刻をファイルへ書き込みます。
+
+    ⭕ このファイルの新しさをEC2側でSSH経由に確認するだけで「落ちたことに気づける」状態を作る。
+       HTTPサーバーは増やさない（ポート開放やセキュリティグループの変更が要らないようにするため）。
+    """
+    await client.wait_until_ready()
+    heartbeat_logic.write_heartbeat()
+
+
+async def alert(message):
+    """予期しない例外をDiscordのアラート先チャンネルへ通知します。
+
+    ⭕ 「静かに失敗して気づかない」のが一番怖いので、原因不明でも必ず一報を飛ばす。
+       アラート送信自体が失敗しても(チャンネル未検出等)Botを巻き込んで落とさない。
+    """
+    try:
+        channel = client.get_channel(ALERT_CHANNEL_ID)
+        if channel is not None:
+            await channel.send(message)
+        else:
+            print(f"⚠️ [alert] アラート用チャンネルが見つかりませんでした: {message}")
+    except Exception as error:
+        print(f"⚠️ [alert] 通知の送信に失敗しました: {type(error).__name__}: {error}")
+
+
+def _register_loop_alert(loop_task, label):
+    """定期タスクで捕捉されなかった例外を、ログ出力とアラート通知の両方につなぐ。
+
+    ⭕ 個々の*_logic.pyやui_*.py側で既にtry/exceptしている失敗（バックアップ失敗の通知など）は
+       二重に届くが、ここは「その保険をすり抜けた想定外の例外」を拾うための最後の砂。
+    """
+    @loop_task.error
+    async def _on_error(error):
+        print(f"❌ [{label}] 想定外のエラーで停止しました: {type(error).__name__}: {error}")
+        await alert(f"❌ **【{label}】想定外のエラーで停止しました**\n`{type(error).__name__}: {error}`")
+
+    return _on_error
 
 
 @tasks.loop(time=DELIVERY_TIMES)
@@ -198,6 +243,11 @@ class MainMenuView(View):
 # ====================================================
 # 🚀 ボット起動時のシステムイベント
 # ====================================================
+_register_loop_alert(xml_news_delivery_task, "定期配信")
+_register_loop_alert(daily_backup_task, "日次バックアップ")
+_register_loop_alert(heartbeat_task, "ハートビート")
+
+
 @client.event
 async def on_ready():
     print(f'{client.user} が起動しました。')
@@ -214,6 +264,35 @@ async def on_ready():
     if not daily_backup_task.is_running():
         daily_backup_task.start()
         print("🗄️ 日次バックアップタスクを開始しました。")
+    if not heartbeat_task.is_running():
+        heartbeat_task.start()
+        print("💓 ハートビートタスクを開始しました。")
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    """スラッシュコマンドで捕捉されなかった例外を、ユーザーへの返信とアラート通知の両方につなぐ。
+
+    ⭕ 何も設定しないと、ユーザーには素っ気ないエラー表示だけが出て、自分（開発者）は気づけないまま終わる。
+    """
+    print(f"❌ [スラッシュコマンド] {interaction.command}: {type(error).__name__}: {error}")
+    await alert(f"❌ **【スラッシュコマンド: {interaction.command}】**\n`{type(error).__name__}: {error}`")
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send("⚠️ エラーが発生しました。", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ エラーが発生しました。", ephemeral=True)
+    except Exception:
+        pass
+
+
+@client.event
+async def on_error(event_method, *args, **kwargs):
+    """イベントハンドラ内で捕捉されなかった例外を拾う（discord.pyの既定はログ出力のみ）。"""
+    import traceback
+    trace = traceback.format_exc()
+    print(f"❌ [イベント: {event_method}] 想定外のエラー:\n{trace}")
+    await alert(f"❌ **【イベント: {event_method}】想定外のエラーが発生しました**\n`{trace[-500:]}`")
 
 
 # ====================================================
