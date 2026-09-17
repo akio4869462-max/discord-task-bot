@@ -52,7 +52,15 @@
 * **弱点分野の可視化**: 分野別の累計正答率をバーで表示し、正答率の低い順（＝弱点が上）に並べます。まだ手をつけていない分野も明示します。
 * **週間サマリーへの統合**: 月曜朝のサマリーに、その週の演習数と正答率を自動で追記します。
 
-### 7. C++タイピング訓練 (`typing_logic.py`)
+### 8. 死活監視（heartbeat + watchdog）
+
+Botが黙って落ちても気づけるよう、`heartbeat_logic.py`が5分おきに`data/heartbeat.txt`へ現在時刻を書き込む。さらに定期タスク・スラッシュコマンド・イベントハンドラで捕捉されなかった例外はすべて`ALERT_CHANNEL_ID`へ通知される。
+
+監視側は別リポジトリを立てず、このリポジトリ自身の`.github/workflows/watchdog.yml`が15分おきにEC2へSSHし、heartbeatの新しさ・コンテナの起動状態・keiba-app-newの`/api/v1`応答の3点を確認し、異常があればDiscordの**Webhook**（Bot自体とは別経路）へ直接通知する。Botが完全に落ちていてもこの通知は届く。
+
+使うにはリポジトリのGitHub Secretsに`DISCORD_ALERT_WEBHOOK`（Discordのチャンネル設定→連携サービス→Webhookで作成するURL）を登録する必要がある。未設定の間は検知は動くが通知はスキップされる。
+
+### 9. C++タイピング訓練 (`typing_logic.py`)
 * **日次メニューの自動通知**: 毎晩20時に、その日の15〜20分メニューと現在取り組んでいるドリル本文を配信します。ドリル本文はコードブロックで送るため、コピーしてそのまま monkeytype の custom text に貼り付けられます。
 * **ドリルの進行管理**: 記号ドリルを A（右小指）→ B（シフト数字）→ C（C++二文字連）→ D（実トークン）の順に管理し、次に進む条件も併せて提示します。
 * **週1回の計測記録**: net WPM・accuracy・consistency・afk の4指標を記録し、開始時の基準値からの伸びと、次の目標ラインとの差を自動で算出します。計測は曜日固定ではなく「前回から7日経過」で日次メニューに自動的に組み込まれます。
@@ -125,6 +133,9 @@ cd discord-task-bot
 DISCORD_TOKEN=your_discord_bot_token_here
 NEWS_CHANNEL_ID=your_news_channel_id
 TASK_CHANNEL_ID=your_task_channel_id
+
+# 以下は死活監視（heartbeat）のアラート先。未設定ならTASK_CHANNEL_IDへ送る
+ALERT_CHANNEL_ID=your_alert_channel_id
 
 # 以下はGoogleカレンダー連携を使う場合のみ必要（任意設定）
 GOOGLE_CALENDAR_ID=your_google_calendar_id

@@ -1,0 +1,69 @@
+name: 死活監視 (Watchdog)
+
+# discord-task-bot / keiba-app-new が同じEC2上で動いている前提で、
+# 15分おきにSSH経由でheartbeatの新しさ・コンテナ状態・keiba-app-newのAPI応答を確認し、
+# 異常があればDiscordのWebhookへ直接通知する（Bot自体が落ちていても届く経路にするため）。
+#
+# ⭕ HTTPサーバーは増やさない。EC2への新しいポート開放やセキュリティグループの変更は不要。
+# ⭕ 異常を検知してもこのジョブ自体は失敗させない（赤いXの通知疲れを避け、Discordへの通知に一本化する）。
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: EC2へSSHして死活確認し、異常があればDiscordへ通知
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DISCORD_ALERT_WEBHOOK: ${{ secrets.DISCORD_ALERT_WEBHOOK }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 2m
+          envs: DISCORD_ALERT_WEBHOOK
+          script: |
+            set +e
+            FAILURES=""
+
+            # 1) discord-task-bot: heartbeatファイルの新しさ（20分＝loop間隔5分の4倍を許容値とする）
+            HEARTBEAT_FILE="$HOME/discord-task-bot/data/heartbeat.txt"
+            if [ -f "$HEARTBEAT_FILE" ]; then
+              LAST=$(cat "$HEARTBEAT_FILE")
+              LAST_EPOCH=$(date -d "$LAST" +%s 2>/dev/null || echo 0)
+              NOW_EPOCH=$(date +%s)
+              AGE=$((NOW_EPOCH - LAST_EPOCH))
+              if [ "$AGE" -gt 1200 ]; then
+                FAILURES="${FAILURES}\ndiscord-task-bot: heartbeatが${AGE}秒前のまま更新されていません"
+              fi
+            else
+              FAILURES="${FAILURES}\ndiscord-task-bot: heartbeatファイルが見つかりません"
+            fi
+
+            # 2) discord-task-bot: コンテナ自体が起動しているか
+            RUNNING=$(docker inspect -f '{{.State.Running}}' discord-task-bot 2>/dev/null)
+            if [ "$RUNNING" != "true" ]; then
+              FAILURES="${FAILURES}\ndiscord-task-bot: コンテナが起動していません"
+            fi
+
+            # 3) keiba-app-new: /api/v1 が200を返すか（同一ホスト内からlocalhostで確認）
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost:8080/api/v1/results/stats)
+            if [ "$HTTP_CODE" != "200" ]; then
+              FAILURES="${FAILURES}\nkeiba-app-new: /api/v1/results/stats が異常応答です (HTTP ${HTTP_CODE})"
+            fi
+
+            if [ -n "$FAILURES" ]; then
+              echo -e "監視で異常を検知しました:${FAILURES}"
+              if [ -n "$DISCORD_ALERT_WEBHOOK" ]; then
+                ESCAPED=$(printf '%b' "$FAILURES" | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+                PAYLOAD="{\"content\": \"🚨 **死活監視アラート**${ESCAPED}\"}"
+                curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_ALERT_WEBHOOK" > /dev/null
+              else
+                echo "DISCORD_ALERT_WEBHOOK が未設定のため、Discordへの通知はスキップしました"
+              fi
+            else
+              echo "異常なし"
+            fi

@@ -153,6 +153,17 @@ def log_session(note=None, now=None):
    バックアップにも復元にも決して含めない（テストで固定している）。各ロジックはファイルを
    使うたびに読むので、復元後の再起動は要らない。
 
+## 死活監視（heartbeat + watchdog）
+
+目的は「落ちたことに自分で気づける」だけ。OpenTelemetryのようなフル構成（Collector・Prometheus・Grafana）はEC2のスペックに対して重すぎると判断し、次の2つだけで構成している。
+
+1. **heartbeat（`heartbeat_logic.py`）**: 5分おきに`data/heartbeat.txt`へ時刻を書くだけ。HTTPサーバーは立てない（新しいポート開放やセキュリティグループ変更を不要にするため）。
+2. **watchdog（`.github/workflows/watchdog.yml`）**: 15分おきに既存のEC2_HOST/EC2_USER/EC2_SSH_KEYでSSHし、heartbeatの新しさ・discord-task-botコンテナの起動状態・keiba-app-newの`/api/v1`応答を確認する。異常時はDiscordのWebhook（`DISCORD_ALERT_WEBHOOK`シークレット）へ直接通知する。Botプロセス自体が死んでいてもこの経路は生きている。
+
+⭕ このワークフローは検知してもジョブ自体は失敗させない（exit 0で終了）。毎回赤いXが並ぶと通知疲れするため、异常の知らせはDiscordへの一本化だけにしている。
+
+⭕ Bot側も`main.py`の`tree.error`・`client.on_error`・各`@tasks.loop`の`.error`ハンドラで、想定外の例外を`ALERT_CHANNEL_ID`へ通知する。個々の処理（バックアップ失敗の通知など）が捕捉済みの例外とは別に、「保険をすり抜けた想定外の例外」を拾う最後の砂として入れてある。
+
 ## 実装上の注意
 
 **外部フィードは総合フィードを使わない。** `news_logic.RSS_FEEDS` は ITmedia AI+ / エンタープライズ / @IT の3本。総合フィード（`itmedia_all.xml`）はスマホ販売ランキングや飲食チェーンの話題まで含み、用語抽出をかけると製品名ばかりになるため意図的に外している。
