@@ -1,0 +1,91 @@
+name: 個人メトリクス収集 (daily)
+
+# discord-task-bot / keiba-app-new から日々の数字（応用情報の演習成績・タイピング練習・
+# 競馬予想バックテスト成績）を集めて metrics/daily.json にまとめ、metrics-data ブランチへ
+# 記録する。この JSON を Claude の日次スケジュールタスクが読みに来て、ダッシュボードとして
+# 表示する想定。
+#
+# ⭕ main ブランチには一切pushしない。deploy.yml は main へのpushだけをトリガーにしているため、
+#    このワークフローがどれだけ動いても本番デプロイは走らない。
+# ⭕ 新しいDBやダッシュボード用サーバーは増やさない。既存のSSHシークレットと、すでに公開されている
+#    keiba-app-newのAPIを読むだけ。
+on:
+  schedule:
+    - cron: "0 21 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSHエージェントを起動
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: サーバーの既知ホスト鍵を許可
+        run: mkdir -p ~/.ssh && ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: discord-task-botから応用情報/タイピングの数値を取得
+        env:
+          # metrics_script.py をbase64化したもの。docker exec先のコンテナへ
+          # stdin経由で渡して実行する（シェルの引用符エスケープ地獄を避けるため）。
+          SCRIPT_B64: aW1wb3J0IGpzb24KaW1wb3J0IGV4YW1fbG9naWMKaW1wb3J0IHR5cGluZ19sb2dpYwoKZXhhbV9kYXRhID0gZXhhbV9sb2dpYy5sb2FkX2V4YW1fZGF0YSgpCnNlc3Npb25zID0gZXhhbV9kYXRhLmdldCgic2Vzc2lvbnMiLCBbXSkKZXhhbV9zdGF0cyA9IGV4YW1fbG9naWMuYWdncmVnYXRlX2J5X2ZpZWxkKHNlc3Npb25zKQp0b3RhbF9hbGwgPSBzdW0oZVsidG90YWwiXSBmb3IgZSBpbiBleGFtX3N0YXRzLnZhbHVlcygpKQpjb3JyZWN0X2FsbCA9IHN1bShlWyJjb3JyZWN0Il0gZm9yIGUgaW4gZXhhbV9zdGF0cy52YWx1ZXMoKSkKcmF0ZV9hbGwgPSByb3VuZChjb3JyZWN0X2FsbCAvIHRvdGFsX2FsbCAqIDEwMCkgaWYgdG90YWxfYWxsIGVsc2UgMAoKdHlwaW5nX2RhdGEgPSB0eXBpbmdfbG9naWMubG9hZF90eXBpbmdfZGF0YSgpCm1lYXN1cmVtZW50cyA9IHR5cGluZ19kYXRhLmdldCgibWVhc3VyZW1lbnRzIiwgW10pCmxhdGVzdCA9IG1lYXN1cmVtZW50c1stMV0gaWYgbWVhc3VyZW1lbnRzIGVsc2UgTm9uZQoKcmVzdWx0ID0gewogICAgImV4YW0iOiB7CiAgICAgICAgInRvdGFsQWxsIjogdG90YWxfYWxsLAogICAgICAgICJjb3JyZWN0QWxsIjogY29ycmVjdF9hbGwsCiAgICAgICAgInJhdGVBbGwiOiByYXRlX2FsbCwKICAgICAgICAiYnlGaWVsZCI6IGV4YW1fc3RhdHMsCiAgICAgICAgImZpZWxkTmFtZXMiOiBleGFtX2xvZ2ljLkVYQU1fRklFTERTLAogICAgfSwKICAgICJ0eXBpbmciOiB7CiAgICAgICAgImN1cnJlbnREcmlsbCI6IHR5cGluZ19kYXRhLmdldCgiY3VycmVudF9kcmlsbCIpLAogICAgICAgICJjdXJyZW50U3RyZWFrIjogdHlwaW5nX2RhdGEuZ2V0KCJjdXJyZW50X3N0cmVhayIpLAogICAgICAgICJsYXN0UHJhY3RpY2VEYXRlIjogdHlwaW5nX2RhdGEuZ2V0KCJsYXN0X3ByYWN0aWNlX2RhdGUiKSwKICAgICAgICAibGF0ZXN0TWVhc3VyZW1lbnQiOiBsYXRlc3QsCiAgICAgICAgImJhc2VsaW5lIjogdHlwaW5nX2xvZ2ljLkJBU0VMSU5FLAogICAgfSwKfQpwcmludChqc29uLmR1bXBzKHJlc3VsdCwgZW5zdXJlX2FzY2lpPUZhbHNlKSkK
+        run: |
+          echo "$SCRIPT_B64" | ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "base64 -d | docker exec -i discord-task-bot python3 -" > /tmp/exam_typing.json
+          cat /tmp/exam_typing.json
+
+      - name: keiba-app-newのバックテスト統計を取得
+        run: |
+          curl -s --max-time 10 "http://${{ secrets.EC2_HOST }}:8080/api/v1/results/stats" > /tmp/keiba_stats.json || echo "{}" > /tmp/keiba_stats.json
+          cat /tmp/keiba_stats.json
+
+      - name: metrics/daily.json を作成
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          from datetime import datetime, timezone
+
+          with open('/tmp/exam_typing.json', encoding='utf-8') as f:
+              exam_typing = json.load(f)
+          try:
+              with open('/tmp/keiba_stats.json', encoding='utf-8') as f:
+                  keiba_stats = json.load(f)
+          except json.JSONDecodeError:
+              keiba_stats = None
+
+          out = {
+              "updatedAt": datetime.now(timezone.utc).isoformat(),
+              "examTyping": exam_typing,
+              "keibaBacktest": keiba_stats,
+          }
+
+          with open('/tmp/daily.json', 'w', encoding='utf-8') as f:
+              json.dump(out, f, ensure_ascii=False)
+          PYEOF
+          cat /tmp/daily.json
+
+      - name: metrics-data ブランチへコミット・push
+        run: |
+          git config user.name "akio4869462-max"
+          git config user.email "akio4869462@gmail.com"
+
+          if git ls-remote --exit-code --heads origin metrics-data > /dev/null 2>&1; then
+            git fetch origin metrics-data
+            git checkout -B metrics-data origin/metrics-data
+          else
+            git checkout --orphan metrics-data
+            git rm -rf . > /dev/null 2>&1 || true
+          fi
+
+          mkdir -p metrics
+          cp /tmp/daily.json metrics/daily.json
+          git add metrics/daily.json
+          git commit -m "chore: 日次メトリクス更新 ($(date -u +%F))" --allow-empty
+          git push origin metrics-data
