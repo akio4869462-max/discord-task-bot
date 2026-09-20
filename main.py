@@ -40,6 +40,7 @@ import ui_exam
 import ui_training
 import ui_typing
 import ui_utility
+import ui_fortune
 from ui_task import TaskSelectCombinedView
 from ui_horse import StableMenuView, run_pending_race
 from ui_news import NewsTermsMenuView
