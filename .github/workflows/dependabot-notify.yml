@@ -1,0 +1,50 @@
+name: Dependabot通知
+
+# Dependabotが作成したPull Requestを検知して、Discordへ知らせるだけのワークフロー。
+# 依存関係の取得やビルドは一切行わない（=最新化そのものはDependabot本体に任せ、
+# ここでは「気づけるようにする」ことだけを担当する）。
+#
+# pull_request ではなく pull_request_target を使う理由：
+# Dependabotが作るPRは pull_request イベントだとGitHub側の制限でsecretsに
+# アクセスできないため、Webhook URLを使ったこの通知が動かない。
+# pull_request_target はベースブランチ側のワークフロー定義で実行され、
+# PR側のコードは一切チェックアウトしない（このワークフローもチェックアウトしない）ため、
+# 外部PRの中身を信用してしまう心配がない。
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discordへ通知
+        env:
+          DISCORD_ALERT_WEBHOOK: ${{ secrets.DISCORD_ALERT_WEBHOOK }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "$DISCORD_ALERT_WEBHOOK" ]; then
+            echo "DISCORD_ALERT_WEBHOOK が未設定のため通知をスキップします"
+            exit 0
+          fi
+
+          ICON="📦"
+          if echo "$PR_BODY" | grep -qiE "GHSA-|CVE-[0-9]|vulnerab"; then
+            ICON="🚨"
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg icon "$ICON" \
+            --arg title "$PR_TITLE" \
+            --arg url "$PR_URL" \
+            '{content: ($icon + " Dependabotが更新PRを作成しました\n**" + $title + "**\n" + $url)}')
+
+          curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_ALERT_WEBHOOK"
