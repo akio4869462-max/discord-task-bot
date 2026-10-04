@@ -11,6 +11,7 @@ import csv
 import json
 import os
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -40,12 +41,33 @@ def _load_json(path, default):
         return default
 
 
+_TITLE_PATTERN = re.compile(
+    r'(令和|平成|R|H)\s*(元|\d+)\s*(?:年度?)?\s*(春|秋)\s*(?:期)?\s*(?:午前)?\s*問\s*(\d+)', re.IGNORECASE)
+_ERA_NAMES = {'R': '令和', 'H': '平成', '令和': '令和', '平成': '平成'}
+
+
+def normalize_title(title):
+    """午前問題の識別名を、過去問道場のCSVと同じ「令和6年春期 問26」の形に揃えます。
+
+    「R6春 午前 問26」「令和6年度春期 問26」「Ｒ６春問２６」などを同じ形にします。
+    形式を読み取れない自由な書き方（午後問題など）は、そのまま返します。
+    """
+    title = (title or '').strip()
+    m = _TITLE_PATTERN.fullmatch(unicodedata.normalize('NFKC', title))
+    if not m:
+        return title
+    era = _ERA_NAMES[m.group(1).upper() if m.group(1).isascii() else m.group(1)]
+    year = '元' if m.group(2) in ('元', '1') else m.group(2)
+    return f"{era}{year}年{m.group(3)}期 問{int(m.group(4))}"
+
+
 def load_review_data():
     """復習ノートをファイルから読み込みます。"""
     data = _load_json(REVIEW_DATA_FILE, {"items": []})
     data.setdefault("items", [])
     for item in data["items"]:
         item.setdefault("topic", "")  # 旧データ（分類の追加前）を補完
+        item["title"] = normalize_title(item["title"])  # 旧データの識別名をCSVと同じ形に補完
     return data
 
 
@@ -74,7 +96,7 @@ def add_item(title, field, keywords, memo='', now=None):
     Returns:
         tuple: (成功したか, メッセージ)
     """
-    title = (title or '').strip()
+    title = normalize_title(title)
     if not title:
         return False, "❌ 問題の識別名（例: R5秋 午前 問23）を入力してください。"
     if field not in exam_logic.EXAM_FIELDS:
@@ -161,8 +183,15 @@ def parse_dojo_csv(text):
             "field": name_to_id.get(cell(row, '分野名')),
             "keywords": [],
             "topic": cell(row, '中分類') or cell(row, '大分類'),
+            "date": _normalize_date(cell(row, '学習日')),
         })
     return entries
+
+
+def _normalize_date(text):
+    """「2026/10/1」を「2026-10-01」にします。読めなければ空文字。"""
+    m = re.fullmatch(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', (text or '').strip())
+    return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else ''
 
 
 def add_items_from_csv(raw, now=None):
@@ -179,28 +208,48 @@ def add_items_from_csv(raw, now=None):
 
 
 def register_entries(entries, now=None):
-    """解析済みの問題リストを復習ノートに登録します（登録済みの識別名は飛ばす）。"""
+    """解析済みの問題リストを復習ノートに登録します。
+
+    - 復習中の問題（未完了）と同じ識別名は飛ばす（状態やキーワードは変えない）。
+    - 完了済みの問題は、CSVの学習日が完了日より新しいときだけ「また間違えた」として
+      復習対象に戻す。古い×（累積した履歴）は無視する。
+    """
     now = now or datetime.now(JST)
+    today = now.strftime('%Y-%m-%d')
     data = load_review_data()
-    existing = {i['title'] for i in data['items'] if i['status'] < STATUS_DONE}
-    added, skipped = [], []
+    by_title = {}
+    for i in data['items']:
+        # 同じ識別名が複数あるときは、復習中のものを優先する
+        if i['title'] not in by_title or i['status'] < STATUS_DONE:
+            by_title[i['title']] = i
+    added, skipped, reopened = [], [], []
     for e in entries:
-        if e['title'] in existing:
-            skipped.append(e['title'])
+        title = normalize_title(e['title'])
+        existing = by_title.get(title)
+        if existing is not None:
+            if existing['status'] >= STATUS_DONE and e.get('date') and e['date'] > existing['updated']:
+                existing['status'] = 0
+                existing['wrong'] = existing.get('wrong', 1) + 1
+                existing['updated'] = today
+                reopened.append(title)
+            else:
+                skipped.append(title)
             continue
-        data['items'].append({
+        item = {
             "id": uuid.uuid4().hex[:8],
-            "title": e['title'],
+            "title": title,
             "field": e['field'],
             "keywords": e['keywords'],
             "topic": e.get('topic', ''),
             "memo": "",
             "status": 0,
             "wrong": 1,
-            "created": now.strftime('%Y-%m-%d'),
-            "updated": now.strftime('%Y-%m-%d'),
-        })
-        added.append(e['title'])
+            "created": today,
+            "updated": today,
+        }
+        data['items'].append(item)
+        by_title[title] = item
+        added.append(title)
     save_review_data(data)
 
     msg = f"📥 {len(added)}問を復習ノートに登録しました。"
@@ -208,6 +257,9 @@ def register_entries(entries, now=None):
         msg += "\n" + "\n".join(f"・{t}" for t in added[:30])
         if len(added) > 30:
             msg += f"\n…ほか{len(added) - 30}問"
+    if reopened:
+        msg += (f"\n🔁 完了済みでしたが、その後また間違えた{len(reopened)}問を復習対象に戻しました。\n"
+                + "\n".join(f"・{t}" for t in reopened[:15]))
     if skipped:
         msg += f"\n（登録済みのため{len(skipped)}問は飛ばしました）"
     if added:

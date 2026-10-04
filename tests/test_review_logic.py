@@ -27,7 +27,7 @@ def test_parse_keywords_splits_and_dedups():
 
 def test_add_item_registers_unlearned():
     ok, msg = _add()
-    assert ok and 'R5秋 午前 問23' in msg
+    assert ok and '令和5年秋期 問23' in msg  # 識別名はCSVと同じ形に揃えて登録される
     item = rl.list_items()[0]
     assert item['status'] == 0 and item['wrong'] == 1 and item['created'] == '2026-10-04'
 
@@ -174,3 +174,81 @@ def test_keyword_list_separates_unset_items_from_keywords():
     msg = rl.build_keyword_list()
     assert 'デッドロック' in msg
     assert 'キーワード未設定（1問）' in msg and '令和6年秋期 問59（システム監査）' in msg
+
+
+# ====================================================
+# 識別名の正規化・重複の扱い
+# ====================================================
+
+@pytest.mark.parametrize('raw, expected', [
+    ('R6春 午前 問26', '令和6年春期 問26'),
+    ('令和6年度春期 問26', '令和6年春期 問26'),
+    ('Ｒ６秋問５９', '令和6年秋期 問59'),
+    ('r5秋期 問23', '令和5年秋期 問23'),
+    ('令和1年秋期 問3', '令和元年秋期 問3'),
+    ('令和元年秋 問03', '令和元年秋期 問3'),
+    ('H30春 午前 問12', '平成30年春期 問12'),
+    ('令和6年春期 問26', '令和6年春期 問26'),
+])
+def test_normalize_title(raw, expected):
+    assert rl.normalize_title(raw) == expected
+
+
+@pytest.mark.parametrize('raw', ['令和6年春期 午後 問1', 'デッドロックの問題', '  ', ''])
+def test_normalize_title_keeps_unrecognized_text(raw):
+    assert rl.normalize_title(raw) == raw.strip()
+
+
+def test_add_item_normalizes_title():
+    rl.add_item('R6秋 午前 問59', 'management', [], now=NOW)
+    assert rl.list_items()[0]['title'] == '令和6年秋期 問59'
+
+
+def test_load_normalizes_old_titles(tmp_path):
+    import json
+    path = rl.REVIEW_DATA_FILE
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({"items": [{"id": "a", "title": "R5秋 午前 問23", "field": "technology", "keywords": [],
+                              "memo": "", "status": 0, "wrong": 1, "created": "2026-10-01",
+                              "updated": "2026-10-01"}]}, f, ensure_ascii=False)
+    assert rl.list_items()[0]['title'] == '令和5年秋期 問23'
+
+
+def test_manual_entry_and_csv_do_not_duplicate():
+    rl.add_item('R6秋 午前 問59', 'management', ['システム監査'], now=NOW)
+    msg = rl.add_items_from_csv(_csv_bytes(), now=NOW)
+    assert '0問' in msg and '1問は飛ばしました' in msg
+    assert len(rl.list_items()) == 1
+    assert rl.list_items()[0]['keywords'] == ['システム監査']  # 既存の内容は変えない
+
+
+def test_parse_dojo_csv_reads_study_date():
+    entries = rl.parse_dojo_csv(rl.decode_csv_bytes(_csv_bytes()))
+    assert entries[0]['date'] == '2026-10-01'
+
+
+def _done_item(done_on):
+    """令和6年秋期 問59を完了済み（完了日=done_on）にする。"""
+    rl.add_item('令和6年秋期 問59', 'management', [], now=done_on)
+    item_id = rl.list_items()[0]['id']
+    for _ in range(3):
+        rl.advance(item_id, now=done_on)
+    return item_id
+
+
+def test_csv_reopens_done_item_when_wrong_again_after_completion():
+    item_id = _done_item(datetime(2026, 9, 30, tzinfo=rl.JST))
+    msg = rl.add_items_from_csv(_csv_bytes(), now=NOW)  # CSVの学習日は2026/10/1
+    assert '🔁' in msg and '1問を復習対象に戻しました' in msg
+    item = rl.get_item(item_id)
+    assert item['status'] == 0 and item['wrong'] == 2
+    assert len(rl.load_review_data()['items']) == 1
+
+
+@pytest.mark.parametrize('done_day', [1, 4])  # CSVの学習日と同日・それより後に完了
+def test_csv_ignores_old_wrong_result_for_done_item(done_day):
+    item_id = _done_item(datetime(2026, 10, done_day, tzinfo=rl.JST))
+    msg = rl.add_items_from_csv(_csv_bytes(), now=NOW)
+    assert '🔁' not in msg and '飛ばしました' in msg
+    assert rl.get_item(item_id)['status'] == 3
+    assert len(rl.load_review_data()['items']) == 1

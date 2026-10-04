@@ -58,7 +58,7 @@ class ReviewFieldDropdown(Select):
 
 class ReviewAddModal(discord.ui.Modal, title='📚 復習ノートに登録'):
     title_input = discord.ui.TextInput(
-        label='問題の識別名', placeholder='例: 令和6年春期 問26', required=True, max_length=60)
+        label='問題の識別名', placeholder="例: R6春 問26(令和6年春期 問26 の形に揃います)", required=True, max_length=60)
     keywords_input = discord.ui.TextInput(
         label='キーワード（「、」区切り・任意）',
         placeholder='例: デッドロック、排他制御', required=False, max_length=200)
