@@ -41,6 +41,15 @@ MAX_UNKNOWN_TERMS_PICKER = 25  # 登録UIの選択肢の件数（Discordのセ�
 _KATAKANA_PATTERN = re.compile(r'[ァ-ヴー]{3,}(?:・[ァ-ヴー]+)*')  # カタカナ語（「セキュリティ・バイ・デザイン」等の中黒複合も1語として扱う）
 _ALPHA_PATTERN = re.compile(r'(?<![A-Za-z0-9])[A-Z][A-Za-z0-9]{1,7}(?![A-Za-z0-9])')  # 大文字始まりの英字（LLM, OpenAI, DuckDB 等）
 _KANJI_ALPHA_PATTERN = re.compile(r'(?<![A-Za-z0-9])[一-龥]{2,4}[A-Z][A-Za-z0-9]{1,7}(?![A-Za-z0-9])')  # 生成AI, 無線LAN 等
+# 純粋な漢字の複合語（量子暗号, 冗長化, 電子透かし 等）。形態素解析を使わない簡易版。
+#   ・3〜6文字。2文字語は実フィードで理由・発表・時代…と一般語ばかりになるため対象外
+#   ・漢字列の途中からは切り出さない（7文字以上の列は文の断片なので丸ごと捨てる）
+#   ・送り仮名で切れて「電子透」「文字起」のような断片になるのを避けるため、名詞化の
+#     語尾（かし・こし）だけは許可する。語尾を増やすときは取りこぼしが出てから足す
+_KANJI_TERM_PATTERN = re.compile(r'(?<![一-龥々])[一-龥々]{3,6}(?:かし|こし|(?![一-龥々]))')
+# 語尾が人・組織・地名を表す漢字列は概念語ではないので除外する（開発者, 従業員, 千葉市 等）。
+# 「向」は「開発者向け」が送り仮名で切れた断片を落とすためのもの
+_KANJI_NON_TERM_SUFFIXES = ('者', '員', '社', '業', '省', '庁', '市', '県', '町', '村', '店', '役', '向')
 _FEED_PREFIX_PATTERN = re.compile(r'^\[[^\]]*\]\s*')  # 「[ITmedia News] 」のような媒体名プレフィックス
 
 # 検出しても学習価値が薄い語。実フィードで頻出したノイズを基に構成しており、
@@ -60,6 +69,10 @@ TERM_STOPWORDS = {
     "Google", "Microsoft", "Apple", "Amazon", "Windows", "Mac", "iPhone", "Android",
     "Server", "Desktop", "Notebook", "Expert", "Face", "Pro", "Studio", "Ultra",
     "Plus", "Max", "Mini", "News", "Web", "App", "Mobile", "PC", "IT", "SE",
+    # 漢字の一般語（ニュース見出しに頻出するが学習価値が薄い）
+    "転換点", "年度上期", "年度上半期", "次世代", "試行錯誤", "新機能", "標準機能",
+    "提供開始", "一般提供", "限定提供", "提供時期", "無料公開", "動画公開",
+    "利用条件", "利用制限", "情報更新", "年次更新",
 }
 
 
@@ -279,7 +292,7 @@ def filter_articles(articles, stock_keywords):
 
 
 def extract_term_candidates(title):
-    """記事タイトルから用語候補（カタカナ語・大文字始まりの英字）を抽出します。
+    """記事タイトルから用語候補（カタカナ語・大文字始まりの英字・漢字語）を抽出します。
 
     媒体名のプレフィックス（「[ITmedia News] 」）は抽出対象から除外します。
 
@@ -290,6 +303,10 @@ def extract_term_candidates(title):
     candidates = set(_KATAKANA_PATTERN.findall(cleaned))
     candidates |= set(_ALPHA_PATTERN.findall(cleaned))
     candidates |= set(_KANJI_ALPHA_PATTERN.findall(cleaned))
+    candidates |= {
+        t for t in _KANJI_TERM_PATTERN.findall(cleaned)
+        if not t.endswith(_KANJI_NON_TERM_SUFFIXES)
+    }
     return {c for c in candidates if c not in TERM_STOPWORDS}
 
 

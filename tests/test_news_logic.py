@@ -388,8 +388,80 @@ def test_extract_kanji_prefixed_acronym():
 def test_extract_does_not_grab_hiragana_particles():
     """助詞ごと拾う誤抽出（「理へのAI」等）を避けるため、接頭辞は漢字に限定している"""
     got = news_logic.extract_term_candidates("総理へのAI家庭教師")
-    assert got == {"AI"}
+    assert "AI" in got
     assert not any("へ" in g for g in got)
+    assert not any("理" in g for g in got)  # 「総理」の断片（「理へのAI」等）も出ない
+
+
+# ====================================================
+# 純粋な漢字語の抽出（正規表現ベースの簡易版）
+# ====================================================
+
+@pytest.mark.parametrize('title,term', [
+    ("量子暗号の実用化に向けた実証実験", "量子暗号"),
+    ("システムの冗長化で可用性を向上", "冗長化"),
+    ("画像に電子透かしを埋め込む技術", "電子透かし"),
+])
+def test_extract_pure_kanji_compounds(title, term):
+    """英字もカナも含まない漢字語は、従来どのパターンにも当たらず未知語に出なかった"""
+    assert term in news_logic.extract_term_candidates(title)
+
+
+@pytest.mark.parametrize('title,term,fragment', [
+    ("画像に電子透かしを埋め込む", "電子透かし", "電子透"),
+    ("電子透かし技術の最新動向", "電子透かし", "電子透"),   # 直後が漢字でも語尾を落とさない
+    ("AIによる文字起こしモデルを公開", "文字起こし", "文字起"),
+])
+def test_extract_kanji_term_keeps_okurigana_tail(title, term, fragment):
+    """送り仮名で切れた断片（「電子透」「文字起」）ではなく、語として完結した形で拾う"""
+    got = news_logic.extract_term_candidates(title)
+    assert term in got
+    assert fragment not in got
+
+
+def test_extract_skips_two_char_kanji_words():
+    """2文字語（情報・処理・発表…）は一般語ばかりでノイズになるため拾わない"""
+    got = news_logic.extract_term_candidates("情報の処理を発表")
+    assert got == set()
+
+
+@pytest.mark.parametrize('title', [
+    "開発者向けの新機能を提供",     # 人・「〜向け」の断片
+    "従業員の働き方を調査",          # 人
+    "千葉市が導入を発表",            # 地名
+    "国内企業の動向",                # 組織・企業
+])
+def test_extract_skips_person_organization_and_place_words(title):
+    got = news_logic.extract_term_candidates(title)
+    assert not any(g.endswith(news_logic._KANJI_NON_TERM_SUFFIXES) for g in got)
+    assert got == set()
+
+
+def test_extract_skips_overlong_kanji_runs():
+    """7文字以上の漢字列は文の断片なので、途中から切り出さず丸ごと捨てる"""
+    got = news_logic.extract_term_candidates("国際標準化機構規格策定の動き")
+    assert got == set()
+
+
+def test_extract_kanji_generic_words_are_stopwords():
+    """3文字以上でも一般語は、既存のTERM_STOPWORDSの仕組みで除外できる"""
+    got = news_logic.extract_term_candidates("次世代の新機能が提供開始")
+    assert got == set()
+
+
+def test_kanji_terms_use_the_same_known_word_filter():
+    """用語集に登録済みの漢字語は、カタカナ語・英字と同じ仕組みで未知語から外れる"""
+    articles = [{"title": "量子暗号と冗長化の話", "link": "u1"}]
+    got = news_logic.detect_unknown_terms(articles, ["量子暗号"])
+    assert [t["term"] for t in got] == ["冗長化"]
+
+
+def test_kanji_pattern_does_not_change_existing_pattern_results():
+    """カタカナ・英字・漢字+英字の検出結果は、漢字語パターンの追加で変わらない"""
+    got = news_logic.extract_term_candidates(
+        "[ITmedia News] 生成AIとセキュリティ・バイ・デザインとLLM、無線LANの量子暗号")
+    assert {"生成AI", "セキュリティ・バイ・デザイン", "LLM", "無線LAN"} <= got
+    assert "量子暗号" in got
 
 
 def test_acronyms_rank_above_other_terms_when_tied():
