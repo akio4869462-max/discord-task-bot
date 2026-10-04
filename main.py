@@ -14,6 +14,7 @@ import exam_logic
 import heartbeat_logic
 import horse_logic
 import news_logic
+import review_logic
 import task_logic
 import training_logic
 import typing_logic
@@ -155,6 +156,12 @@ async def xml_news_delivery_task():
         # 💪 今日のトレーニングメニューも配信
         if task_channel is not None:
             await send_training_notification(task_channel)
+
+        # 📚 復習ノートに復習対象があれば知らせる
+        if task_channel is not None:
+            review_notice = review_logic.build_morning_notice()
+            if review_notice:
+                await task_channel.send(review_notice)
 
         # 🏁 開催日の朝は、出走登録の有無を知らせる
         # ⭕ レース自体は20:00に自動で走るので、ここは「登録し忘れに気づく」ためだけにある。

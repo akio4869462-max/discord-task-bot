@@ -27,6 +27,7 @@ BACKUP_TARGETS = (
     'player_data.json',     # 旧・就活RPGの記録（初代馬への移行元）
     'glossary.json',        # ストックした用語
     'exam_data.json',       # 演習成績
+    'review_data.json',     # 復習ノート（間違えた問題・キーワード）
     'training_data.json',   # トレーニングログ・体組成
     'typing_data.json',     # タイピング記録
     'news_keywords.json',   # ニュース検索キーワード

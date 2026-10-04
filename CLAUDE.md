@@ -48,6 +48,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `race_sim/calendar.py` | 番組表（土曜・水曜の開催） | — |
 | `news_logic.py` | RSS取得・既知語フィルタ・未知語検出 | `data/news_keywords.json`（読み: `data/glossary.json` も） |
 | `exam_logic.py` | 応用情報の分野別演習記録 | `data/exam_data.json` |
+| `review_logic.py` | 過去問の復習ノート（間違えた問題・キーワード・復習の4段階） | `data/review_data.json` |
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
 | `calendar_logic.py` | Googleカレンダーへの期限同期（任意） | `data/service_account.json` |

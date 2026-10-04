@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ui import View, Select
 
 import exam_logic
+from ui_review import ReviewMenuView
 from bot_state import tree
 from ui_common import parse_positive_int, process_exam_completion
 
@@ -23,6 +24,10 @@ class ExamMenuView(View):
     @discord.ui.button(label="📊 演習成績", style=discord.ButtonStyle.secondary, row=0)
     async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
+
+    @discord.ui.button(label="📚 復習ノート", style=discord.ButtonStyle.success, row=1)
+    async def review_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("メニューを選んでください：", view=ReviewMenuView(), ephemeral=True)
 
 
 class ExamFieldSelectView(View):
