@@ -340,3 +340,57 @@ def test_import_with_no_wrong_answers_still_records_progress():
     msg, solved = rl.import_dojo_csv(only_right, now=NOW)
     assert solved == 2 and '追加する問題（最後の結果が×のもの）はありません' in msg
     assert rl.list_items() == []
+
+
+# ====================================================
+# 演習成績のリセット（CSVへの置き換え）
+# ====================================================
+
+def _log_manual_sessions():
+    el.log_session('technology', 20, 13, now=NOW)  # /exam log による手動記録
+    el.log_session('strategy', 10, 4, now=NOW)
+
+
+def test_reset_replaces_manual_records_with_csv():
+    _log_manual_sessions()
+    msg, solved = rl.import_dojo_csv(_progress_csv(), now=NOW, reset=True)
+    sessions = el.load_exam_data()['sessions']
+    assert {s['source'] for s in sessions} == {'csv'}  # 手動記録は消えている
+    assert sum(s['total'] for s in sessions) == 4 and sum(s['correct'] for s in sessions) == 2
+    assert '30問・正解17問）をリセット' in msg
+    assert solved == 0 and '馬の調教には反映していません' in msg
+
+
+def test_reset_rebases_weekly_snapshot():
+    _log_manual_sessions()
+    rl.import_dojo_csv(_progress_csv(), now=NOW, reset=True)
+    assert el.load_exam_data()['weekly_snapshot'] == {'total': 4, 'correct': 2}
+    assert el.get_weekly_exam_summary() == ''  # 置き換え直後に「今週の分」が膨らまない
+
+
+def test_import_after_reset_is_incremental_again():
+    rl.import_dojo_csv(_progress_csv(), now=NOW, reset=True)
+    msg, solved = rl.import_dojo_csv(_progress_csv(), now=NOW)
+    assert solved == 0 and '新しく記録する分はありません' in msg
+    assert sum(s['total'] for s in el.load_exam_data()['sessions']) == 4
+
+
+def test_reset_does_not_touch_review_items_or_exp():
+    rl.import_dojo_csv(_progress_csv(), now=NOW)
+    before = len(rl.list_items())
+    _, solved = rl.import_dojo_csv(_progress_csv(), now=NOW, reset=True)
+    assert len(rl.list_items()) == before and solved == 0
+
+
+def test_reset_with_bad_csv_keeps_existing_records():
+    _log_manual_sessions()
+    msg, _ = rl.import_dojo_csv(b'not a csv', reset=True)
+    assert msg.startswith('❌')
+    assert sum(s['total'] for s in el.load_exam_data()['sessions']) == 30
+
+
+def test_reset_with_nothing_to_record_keeps_existing_records():
+    _log_manual_sessions()
+    msg, _ = rl.import_dojo_csv(_progress_csv(), since='2027/01/01', now=NOW, reset=True)
+    assert msg.startswith('❌') and 'リセットしませんでした' in msg
+    assert sum(s['total'] for s in el.load_exam_data()['sessions']) == 30

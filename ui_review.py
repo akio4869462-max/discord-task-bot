@@ -1,9 +1,13 @@
 """応用情報 復習ノートのView/Modal（資格学習メニューの「📚 復習ノート」から開く）"""
 
+import asyncio
+import os
+
 import discord
 from discord import app_commands
 from discord.ui import View, Select
 
+import backup_logic
 import exam_logic
 import review_logic
 from bot_state import tree
@@ -76,12 +80,27 @@ class ReviewAddModal(discord.ui.Modal, title='📚 復習ノートに登録'):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
-async def run_csv_import(interaction, raw, since=''):
+RESET_WORD = 'リセット'
+
+
+async def run_csv_import(interaction, raw, since='', reset=False):
     """CSVを取り込み、復習ノート・演習成績・馬の調教（賢さ）に反映する。
 
+    reset=True のときは、これまでの演習成績を消してCSVの内容で置き換える。
+    消す前に、いまの状態をバックアップのZIPとして退避する。
     interactionは呼び出し側でdefer済みであること。
     """
-    msg, solved = review_logic.import_dojo_csv(raw, since)
+    backup_note = ""
+    if reset:
+        zip_path, _, _ = await asyncio.to_thread(backup_logic.create_archive, None, 'before-exam-reset')
+        if zip_path is None:
+            await interaction.followup.send(
+                "❌ バックアップを作れなかったので、リセットは中止しました。", ephemeral=True)
+            return
+        backup_note = f"\n💾 リセット前の状態を退避しました（`{os.path.basename(zip_path)}`）。"
+    msg, solved = review_logic.import_dojo_csv(raw, since, reset=reset)
+    if reset and not msg.startswith("❌"):
+        msg += backup_note
     public_msg = None
     if solved > 0:
         # 今回新しく記録した問題数ぶんを、/exam log と同じ換算で賢さの調教にする
@@ -107,6 +126,11 @@ class ReviewCsvModal(discord.ui.Modal, title='📊 過去問道場のCSVを取�
         description='空欄なら全期間。手動で記録済みの日と重なるときは、その翌日を入れる',
         component=discord.ui.TextInput(required=False, max_length=10, placeholder='例: 2026/10/5'),
     )
+    reset_input = discord.ui.Label(
+        text='演習成績をリセットしてCSVに置き換える（任意）',
+        description=f'これまでの演習成績を消してCSVの内容にします。する場合は「{RESET_WORD}」と入力',
+        component=discord.ui.TextInput(required=False, max_length=10, placeholder=RESET_WORD),
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -118,7 +142,8 @@ class ReviewCsvModal(discord.ui.Modal, title='📊 過去問道場のCSVを取�
             await interaction.followup.send("❌ ファイルが大きすぎます（1MBまで）。", ephemeral=True)
             return
         raw = await files[0].read()
-        await run_csv_import(interaction, raw, self.since_input.component.value)
+        reset = self.reset_input.component.value.strip() == RESET_WORD
+        await run_csv_import(interaction, raw, self.since_input.component.value, reset=reset)
 
 
 class ReviewKeywordModal(discord.ui.Modal, title='🔑 キーワード編集'):
@@ -246,11 +271,14 @@ class ReviewItemActionView(View):
 @app_commands.describe(
     file="過去問道場からエクスポートしたCSVファイル",
     since="演習成績に記録する開始日（任意。例: 2026/10/5。空欄なら全期間）",
+    reset="これまでの演習成績を消してCSVの内容に置き換える（実行前に自動でバックアップ）",
 )
-async def review_import_command(interaction: discord.Interaction, file: discord.Attachment, since: str = ''):
+async def review_import_command(
+    interaction: discord.Interaction, file: discord.Attachment, since: str = '', reset: bool = False,
+):
     if file.size > review_logic.MAX_CSV_BYTES:
         await interaction.response.send_message("❌ ファイルが大きすぎます（1MBまで）。", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     raw = await file.read()
-    await run_csv_import(interaction, raw, since)
+    await run_csv_import(interaction, raw, since, reset=reset)

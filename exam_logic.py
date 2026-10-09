@@ -150,6 +150,35 @@ def record_csv_progress(aggregates, now=None):
     return added
 
 
+def reset_exam_progress():
+    """演習記録をすべて消し、週間サマリーの基準も取り直します。
+
+    ⭕ 呼び出し側（CSVの置き換え取り込み）が、実行前にバックアップのZIPを退避しておくこと。
+
+    Returns:
+        tuple: (消した問題数, 消した正解数)
+    """
+    data = load_exam_data()
+    sessions = data.get('sessions', [])
+    removed = (sum(s.get('total', 0) for s in sessions), sum(s.get('correct', 0) for s in sessions))
+    data['sessions'] = []
+    data['csv_imported'] = {}
+    data['weekly_snapshot'] = {}
+    save_exam_data(data)
+    return removed
+
+
+def rebase_weekly_snapshot():
+    """週間サマリーの基準を現在の累計に合わせます（置き換え取り込み直後に「今週の分」が膨らまないように）。"""
+    data = load_exam_data()
+    sessions = data.get('sessions', [])
+    data['weekly_snapshot'] = {
+        "total": sum(s.get('total', 0) for s in sessions),
+        "correct": sum(s.get('correct', 0) for s in sessions),
+    }
+    save_exam_data(data)
+
+
 def aggregate_by_field(sessions):
     """演習記録を分野別に集計します。
 

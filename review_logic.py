@@ -253,12 +253,15 @@ def format_progress(added):
     return msg
 
 
-def import_dojo_csv(raw, since='', now=None):
+def import_dojo_csv(raw, since='', now=None, reset=False):
     """過去問道場のCSVを取り込み、復習ノートへの登録と演習成績の記録を行います。
 
     - 復習ノート: 各問題の最後の結果が×のものを登録する（register_entries）。
     - 演習成績: 学習日×分野で集計し、取り込み済みの量との差分だけを記録する。
       同じCSVを何度取り込んでも二重に数えない。
+    - reset=True: これまでの演習成績をすべて消してから、CSVの内容で置き換える。
+      CSVが読めなかったときは何も消さない。呼び出し側がバックアップを退避しておくこと。
+      既存の記録（手動記録）は馬の調教に反映済みなので、置き換え分は調教に反映しない。
 
     Returns:
         tuple: (メッセージ, 今回新しく記録した問題数)。問題数は馬の調教への反映に使う。
@@ -277,15 +280,32 @@ def import_dojo_csv(raw, since='', now=None):
                 "過去問道場の成績CSV（正誤・分野名・出典・学習日の列を含むもの）を選んでください。"
                 + (f"\n（{since}以降の学習がない場合も、この表示になります）" if since else "")), 0
 
+    if reset and not aggregates:
+        # 置き換え先のデータが無いのに消すと、成績が空になってしまうので何もしない
+        return ("❌ 記録できる学習データがないため、リセットしませんでした。"
+                "開始日の指定を見直してください。"), 0
+
     parts = []
     entries = parse_dojo_csv(text)
     if entries:
         parts.append(register_entries(entries, now))
     else:
         parts.append("📚 復習ノートに追加する問題（最後の結果が×のもの）はありませんでした。")
+
+    removed_total = removed_correct = 0
+    if reset:
+        removed_total, removed_correct = exam_logic.reset_exam_progress()
     added = exam_logic.record_csv_progress(aggregates, now)
+    solved = sum(t for t, _ in added.values())
+    if reset:
+        exam_logic.rebase_weekly_snapshot()
+        parts.append(f"🔄 これまでの演習成績（{removed_total}問・正解{removed_correct}問）をリセットして、"
+                     "CSVの内容に置き換えました。")
+        parts.append(format_progress(added))
+        parts.append("馬の調教には反映していません（これまでの記録で反映済みのため）。")
+        return "\n\n".join(parts), 0
     parts.append(format_progress(added))
-    return "\n\n".join(parts), sum(t for t, _ in added.values())
+    return "\n\n".join(parts), solved
 
 
 def register_entries(entries, now=None):
