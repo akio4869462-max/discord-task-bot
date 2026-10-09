@@ -2,6 +2,7 @@ from datetime import datetime
 
 import pytest
 
+import exam_logic as el
 import review_logic as rl
 
 NOW = datetime(2026, 10, 4, 9, 0, tzinfo=rl.JST)
@@ -10,6 +11,8 @@ NOW = datetime(2026, 10, 4, 9, 0, tzinfo=rl.JST)
 @pytest.fixture(autouse=True)
 def isolated_file(tmp_path, monkeypatch):
     monkeypatch.setattr(rl, 'REVIEW_DATA_FILE', str(tmp_path / 'review_data.json'))
+    # CSV取り込みは演習成績(exam_data.json)にも書くので、こちらも差し替える
+    monkeypatch.setattr(el, 'EXAM_DATA_FILE', str(tmp_path / 'exam_data.json'))
 
 
 def _add(title='R5秋 午前 問23', field='technology', keywords=('デッドロック',)):
@@ -252,3 +255,88 @@ def test_csv_ignores_old_wrong_result_for_done_item(done_day):
     assert '🔁' not in msg and '飛ばしました' in msg
     assert rl.get_item(item_id)['status'] == 3
     assert len(rl.load_review_data()['items']) == 1
+
+
+# ====================================================
+# CSV取り込みによる演習成績の記録
+# ====================================================
+
+def _progress_csv():
+    """2日分・3分野: 10/1 テクノロジ2問(○×)・マネジメント1問(×)、10/4 テクノロジ1問(○)。"""
+    def link(label):
+        return '"=HYPERLINK(""https://example.com/q.html"",""' + label + '"")"'
+
+    lines = [
+        "No.,正誤,分野名,大分類,中分類,出典,学習日",
+        f'1,○,テクノロジ系,技術要素,データベース,{link("令和6年春期 問26")},2026/10/1',
+        f'2,×,テクノロジ系,技術要素,セキュリティ,{link("令和6年春期 問40")},2026/10/1',
+        f'3,×,マネジメント系,サービスマネジメント,システム監査,{link("令和6年秋期 問59")},2026/10/1',
+        f'4,○,テクノロジ系,技術要素,データベース,{link("令和6年春期 問27")},2026/10/4',
+    ]
+    return "\n".join(lines).encode('cp932')
+
+
+def test_aggregate_counts_every_attempt_by_day_and_field():
+    agg = rl.aggregate_dojo_attempts(rl.decode_csv_bytes(_progress_csv()))
+    assert agg == {
+        ('2026-10-01', 'technology'): [2, 1],
+        ('2026-10-01', 'management'): [1, 0],
+        ('2026-10-04', 'technology'): [1, 1],
+    }
+
+
+def test_aggregate_since_filters_older_days():
+    agg = rl.aggregate_dojo_attempts(rl.decode_csv_bytes(_progress_csv()), since='2026-10-02')
+    assert agg == {('2026-10-04', 'technology'): [1, 1]}
+
+
+def test_aggregate_rejects_unknown_header():
+    assert rl.aggregate_dojo_attempts('a,b\n1,2') == {}
+
+
+def test_import_records_exam_progress_and_review_items():
+    msg, solved = rl.import_dojo_csv(_progress_csv(), now=NOW)
+    assert solved == 4
+    assert '4問（正解 2問・正答率 50%）' in msg and '2問を復習ノートに登録' in msg
+    sessions = el.load_exam_data()['sessions']
+    assert sum(s['total'] for s in sessions) == 4 and sum(s['correct'] for s in sessions) == 2
+    assert {s['source'] for s in sessions} == {'csv'}
+    assert len(rl.list_items()) == 2
+
+
+def test_import_same_csv_twice_does_not_double_count():
+    rl.import_dojo_csv(_progress_csv(), now=NOW)
+    msg, solved = rl.import_dojo_csv(_progress_csv(), now=NOW)
+    assert solved == 0 and '新しく記録する分はありません' in msg
+    assert sum(s['total'] for s in el.load_exam_data()['sessions']) == 4
+
+
+def test_import_only_adds_the_difference_for_a_grown_csv():
+    rl.import_dojo_csv(_progress_csv(), now=NOW)
+    grown = _progress_csv() + '\n5,×,テクノロジ系,技術要素,ネットワーク,"=HYPERLINK(""x"",""令和6年春期 問30"")",2026/10/4'.encode('cp932')
+    msg, solved = rl.import_dojo_csv(grown, now=NOW)
+    assert solved == 1
+    sessions = el.load_exam_data()['sessions']
+    assert sum(s['total'] for s in sessions) == 5 and sum(s['correct'] for s in sessions) == 2
+
+
+def test_import_since_limits_exam_progress_but_not_review_items():
+    msg, solved = rl.import_dojo_csv(_progress_csv(), since='2026/10/2', now=NOW)
+    assert solved == 1
+    assert sum(s['total'] for s in el.load_exam_data()['sessions']) == 1
+    assert len(rl.list_items()) == 2  # 復習ノートは最後の結果が×の問題を全期間から登録する
+
+
+def test_import_rejects_bad_since_and_bad_csv():
+    assert rl.import_dojo_csv(_progress_csv(), since='きのう')[0].startswith('❌')
+    assert rl.import_dojo_csv(b'not a csv')[0].startswith('❌')
+    assert rl.import_dojo_csv(b'x' * (rl.MAX_CSV_BYTES + 1))[0].startswith('❌')
+    assert el.load_exam_data()['sessions'] == []
+
+
+def test_import_with_no_wrong_answers_still_records_progress():
+    only_right = "\n".join(_progress_csv().decode('cp932').splitlines()[:2] + [
+        _progress_csv().decode('cp932').splitlines()[4]]).encode('cp932')
+    msg, solved = rl.import_dojo_csv(only_right, now=NOW)
+    assert solved == 2 and '追加する問題（最後の結果が×のもの）はありません' in msg
+    assert rl.list_items() == []

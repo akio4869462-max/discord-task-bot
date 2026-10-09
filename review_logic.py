@@ -126,6 +126,7 @@ def add_item(title, field, keywords, memo='', now=None):
 # ====================================================
 
 _WRONG_MARKS = ('×', '✕', '✖', '╳', 'Ｘ')
+_RIGHT_MARKS = ('○', '◯', '〇', '⭕')
 _HYPERLINK_LABEL = re.compile(r'=HYPERLINK\("[^"]*","([^"]*)"\)')
 MAX_CSV_BYTES = 1_000_000
 
@@ -205,6 +206,86 @@ def add_items_from_csv(raw, now=None):
                 "過去問道場の成績CSV（正誤・出典の列を含むもの）を添付してください。"
                 "最後の結果が×の問題がない場合も登録されません。")
     return register_entries(entries, now)
+
+
+def aggregate_dojo_attempts(text, since=''):
+    """過去問道場のCSVの全行（解いた回数）を、学習日×分野ごとに集計します。
+
+    Args:
+        since (str): この日以降（含む）の学習だけを数える。'YYYY-MM-DD'。空なら全期間。
+
+    Returns:
+        dict: {(学習日, 分野ID): [解いた数, 正解数]}。ヘッダーが想定外なら空。
+    """
+    rows = list(csv.reader((text or '').splitlines()))
+    if not rows or '正誤' not in rows[0] or '学習日' not in rows[0] or '分野名' not in rows[0]:
+        return {}
+    col = {name: i for i, name in enumerate(rows[0])}
+    name_to_id = {v: k for k, v in exam_logic.EXAM_FIELDS.items()}
+
+    totals = {}
+    for row in rows[1:]:
+        try:
+            result = row[col['正誤']].strip()
+            field = name_to_id.get(row[col['分野名']].strip())
+            date = _normalize_date(row[col['学習日']])
+        except IndexError:
+            continue
+        wrong = any(c in result for c in _WRONG_MARKS)
+        right = any(c in result for c in _RIGHT_MARKS)
+        if not (wrong or right) or field is None or not date or (since and date < since):
+            continue
+        entry = totals.setdefault((date, field), [0, 0])
+        entry[0] += 1
+        entry[1] += 1 if right and not wrong else 0
+    return totals
+
+
+def format_progress(added):
+    """exam_logic.record_csv_progress の結果を、取り込み結果の文言にします。"""
+    total = sum(t for t, _ in added.values())
+    correct = sum(c for _, c in added.values())
+    if total == 0:
+        return "📊 演習成績: 新しく記録する分はありませんでした（取り込み済みです）。"
+    msg = f"📊 演習成績に記録しました: {total}問（正解 {correct}問・正答率 {round(correct / total * 100)}%）"
+    for field, (t, c) in added.items():
+        msg += f"\n・{exam_logic.EXAM_FIELDS[field]}: {c}/{t}問"
+    return msg
+
+
+def import_dojo_csv(raw, since='', now=None):
+    """過去問道場のCSVを取り込み、復習ノートへの登録と演習成績の記録を行います。
+
+    - 復習ノート: 各問題の最後の結果が×のものを登録する（register_entries）。
+    - 演習成績: 学習日×分野で集計し、取り込み済みの量との差分だけを記録する。
+      同じCSVを何度取り込んでも二重に数えない。
+
+    Returns:
+        tuple: (メッセージ, 今回新しく記録した問題数)。問題数は馬の調教への反映に使う。
+    """
+    if len(raw) > MAX_CSV_BYTES:
+        return "❌ ファイルが大きすぎます（1MBまで）。", 0
+    since = (since or '').strip()
+    if since:
+        since = _normalize_date(since)
+        if not since:
+            return "❌ 開始日は「2026/10/5」の形で入力してください。", 0
+    text = decode_csv_bytes(raw)
+    aggregates = aggregate_dojo_attempts(text, since) if text is not None else {}
+    if not aggregates and not (text is not None and parse_dojo_csv(text)):
+        return ("❌ 取り込めるデータが見つかりませんでした。\n"
+                "過去問道場の成績CSV（正誤・分野名・出典・学習日の列を含むもの）を選んでください。"
+                + (f"\n（{since}以降の学習がない場合も、この表示になります）" if since else "")), 0
+
+    parts = []
+    entries = parse_dojo_csv(text)
+    if entries:
+        parts.append(register_entries(entries, now))
+    else:
+        parts.append("📚 復習ノートに追加する問題（最後の結果が×のもの）はありませんでした。")
+    added = exam_logic.record_csv_progress(aggregates, now)
+    parts.append(format_progress(added))
+    return "\n\n".join(parts), sum(t for t, _ in added.values())
 
 
 def register_entries(entries, now=None):

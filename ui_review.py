@@ -7,6 +7,7 @@ from discord.ui import View, Select
 import exam_logic
 import review_logic
 from bot_state import tree
+from ui_common import process_exam_completion
 
 
 class ReviewMenuView(View):
@@ -75,12 +76,36 @@ class ReviewAddModal(discord.ui.Modal, title='📚 復習ノートに登録'):
         await interaction.response.send_message(msg, ephemeral=True)
 
 
+async def run_csv_import(interaction, raw, since=''):
+    """CSVを取り込み、復習ノート・演習成績・馬の調教（賢さ）に反映する。
+
+    interactionは呼び出し側でdefer済みであること。
+    """
+    msg, solved = review_logic.import_dojo_csv(raw, since)
+    public_msg = None
+    if solved > 0:
+        # 今回新しく記録した問題数ぶんを、/exam log と同じ換算で賢さの調教にする
+        exp_msg, public_msg = process_exam_completion(solved)
+        msg += exp_msg
+    await interaction.followup.send(msg, ephemeral=True)
+    if public_msg and interaction.channel is not None:
+        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
+
+
 class ReviewCsvModal(discord.ui.Modal, title='📊 過去問道場のCSVを取り込む'):
-    """過去問道場からエクスポートした成績CSVを選ぶモーダル（最後の結果が×の問題だけ登録する）"""
+    """過去問道場の成績CSVを選ぶモーダル。
+
+    復習ノートへ（最後の結果が×の問題）、演習成績へ（解いた数・正解数）、馬の調教へ反映する。
+    """
     csv_file = discord.ui.Label(
         text='成績CSVファイル',
         description='道場の成績画面からダウンロードしたCSV',
         component=discord.ui.FileUpload(required=True, min_values=1, max_values=1),
+    )
+    since_input = discord.ui.Label(
+        text='演習成績に記録する開始日（任意）',
+        description='空欄なら全期間。手動で記録済みの日と重なるときは、その翌日を入れる',
+        component=discord.ui.TextInput(required=False, max_length=10, placeholder='例: 2026/10/5'),
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -93,7 +118,7 @@ class ReviewCsvModal(discord.ui.Modal, title='📊 過去問道場のCSVを取�
             await interaction.followup.send("❌ ファイルが大きすぎます（1MBまで）。", ephemeral=True)
             return
         raw = await files[0].read()
-        await interaction.followup.send(review_logic.add_items_from_csv(raw), ephemeral=True)
+        await run_csv_import(interaction, raw, self.since_input.component.value)
 
 
 class ReviewKeywordModal(discord.ui.Modal, title='🔑 キーワード編集'):
@@ -218,11 +243,14 @@ class ReviewItemActionView(View):
 # 過去問道場のCSVからの一括登録（/review_import）
 # ====================================================
 @tree.command(name="review_import", description="過去問道場の成績CSVから、間違えた問題を復習ノートに一括登録します")
-@app_commands.describe(file="過去問道場からエクスポートしたCSVファイル")
-async def review_import_command(interaction: discord.Interaction, file: discord.Attachment):
+@app_commands.describe(
+    file="過去問道場からエクスポートしたCSVファイル",
+    since="演習成績に記録する開始日（任意。例: 2026/10/5。空欄なら全期間）",
+)
+async def review_import_command(interaction: discord.Interaction, file: discord.Attachment, since: str = ''):
     if file.size > review_logic.MAX_CSV_BYTES:
         await interaction.response.send_message("❌ ファイルが大きすぎます（1MBまで）。", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
     raw = await file.read()
-    msg = review_logic.add_items_from_csv(raw)
-    await interaction.response.send_message(msg, ephemeral=True)
+    await run_csv_import(interaction, raw, since)

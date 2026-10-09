@@ -110,6 +110,46 @@ def log_session(field, total, correct, now=None):
     return msg
 
 
+def record_csv_progress(aggregates, now=None):
+    """過去問道場のCSVを集計した結果を、演習記録に差分だけ追加します。
+
+    ⭕ CSVは履歴が累積していくので、同じファイルや、あとから足したファイルを取り込んでも
+       二重に数えないよう、取り込み済みの量を「学習日|分野」ごとに data['csv_imported'] へ
+       覚えておき、今回との差分だけを記録する。
+
+    Args:
+        aggregates (dict): {(学習日 'YYYY-MM-DD', 分野ID): [解いた数, 正解数]}。
+        now (datetime, optional): 未使用（他の記録関数と引数をそろえるための注入口）。
+
+    Returns:
+        dict: 今回新しく記録した量 {分野ID: [問題数, 正解数]}。
+    """
+    data = load_exam_data()
+    imported = data.setdefault('csv_imported', {})
+    added = {}
+    for (date, field), (total, correct) in sorted(aggregates.items()):
+        if field not in EXAM_FIELDS:
+            continue
+        key = f"{date}|{field}"
+        prev = imported.get(key, {"total": 0, "correct": 0})
+        delta_total = total - prev['total']
+        if delta_total <= 0:
+            continue
+        delta_correct = max(0, min(correct - prev['correct'], delta_total))
+        data['sessions'].append({
+            "date": date, "field": field,
+            "total": delta_total, "correct": delta_correct,
+            "source": "csv",
+        })
+        imported[key] = {"total": total, "correct": correct}
+        entry = added.setdefault(field, [0, 0])
+        entry[0] += delta_total
+        entry[1] += delta_correct
+    if added:
+        save_exam_data(data)
+    return added
+
+
 def aggregate_by_field(sessions):
     """演習記録を分野別に集計します。
 
