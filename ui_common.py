@@ -89,8 +89,13 @@ def process_task_completion(category):
     if not category:
         return "", None
 
-    result = horse_logic.add_growth(category, TASK_COMPLETE_MINUTES)
     cat_name = task_logic.CATEGORY_MAP.get(category, "開発")
+    # ⭕ 日常タスクのように調教の対象外のカテゴリは、「調教になりました」と出すと嘘になるので
+    #    馬には何も入れず、対象外であることだけを伝える。
+    if category not in horse_logic.ACTIVITY_PARAMS:
+        return f"\n✨ タスク完了！ 【{cat_name}】は調教の対象外です", None
+
+    result = horse_logic.add_growth(category, TASK_COMPLETE_MINUTES)
     detail_msg = f"\n✨ タスク完了！ 【{cat_name}】{TASK_COMPLETE_MINUTES}分の調教になりました"
 
     event_detail, public_msg = build_growth_message(result)

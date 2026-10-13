@@ -18,7 +18,10 @@ DB_FILE = os.path.join('data', 'todo.json')
 CATEGORY_MAP = {
     'programming': '💻 開発',
     'document': '📝 書類・面接',
-    'reading': '📚 インプット'
+    'reading': '📚 インプット',
+    # ⭕ 日常の用事（買い物・手続き・掃除など）。馬の調教（horse_logic.ACTIVITY_PARAMS）には
+    #    入れない。完了のたびに調教時間が入ると、育成のバランスが崩れるため。
+    'daily': '🏠 日常',
 }
 
 PRIORITY_MAP = {

@@ -22,12 +22,16 @@ class TaskCategorySelectView(View):
     async def reading_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TaskAddModal("reading"))
 
+    @discord.ui.button(label="🏠 日常", style=discord.ButtonStyle.primary)
+    async def daily_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(TaskAddModal("daily"))
+
 
 class TaskAddModal(discord.ui.Modal, title='📝 新しいタスクの追加'):
     """カテゴリ選択後にポップアップする、タスク内容・期限入力用のモーダルフォーム"""
     task_input = discord.ui.TextInput(
         label='タスクの内容',
-        placeholder='例: 職務経歴書の推敲、ボットのUI拡張など',
+        placeholder='例: 職務経歴書の推敲、ボットのUI拡張、買い物など',
         required=True
     )
     deadline_input = discord.ui.TextInput(
@@ -148,6 +152,7 @@ async def task_autocomplete(interaction: discord.Interaction, current: str):
     category=[
         app_commands.Choice(name="💻 開発", value="programming"),
         app_commands.Choice(name="📚 インプット", value="reading"),
+        app_commands.Choice(name="🏠 日常", value="daily"),
     ],
     priority=[
         app_commands.Choice(name="★★★ 高", value=3),

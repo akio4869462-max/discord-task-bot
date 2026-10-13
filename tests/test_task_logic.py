@@ -27,6 +27,15 @@ def test_add_task_creates_item_with_expected_fields():
     assert 'id' in data[0]
 
 
+def test_add_task_accepts_daily_category():
+    """開発・インプット以外の日常のタスクも、独立したカテゴリとして登録できる"""
+    msg = task_logic.add_task('牛乳を買う', 'daily', None, 2)
+
+    assert task_logic.load_data()[0]['category'] == 'daily'
+    assert task_logic.CATEGORY_MAP['daily'] in msg
+    assert task_logic.CATEGORY_MAP['daily'] in task_logic.list_tasks()
+
+
 def test_add_task_invalid_category_falls_back_to_programming():
     task_logic.add_task('タスク', category='invalid_category')
     assert task_logic.load_data()[0]['category'] == 'programming'

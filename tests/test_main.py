@@ -154,6 +154,18 @@ def test_process_task_completion_trains_the_matching_parameter():
     assert growth['speed'] == bot_state.TASK_COMPLETE_MINUTES * share
 
 
+def test_process_task_completion_for_daily_task_does_not_train_the_horse():
+    """日常タスクは調教の対象外。完了しても能力は上がらず、連続記録も動かない。"""
+    detail, public = main.process_task_completion('daily')
+
+    assert '対象外' in detail
+    assert '調教になりました' not in detail
+    assert public is None
+    stable = horse_logic.load_stable()
+    assert all(v == 0 for v in stable['current']['growth'].values())
+    assert not stable.get('current_streak')
+
+
 def test_process_task_completion_without_a_category_does_nothing():
     detail, public = main.process_task_completion(None)
     assert detail == '' and public is None
