@@ -159,6 +159,17 @@ def test_training_and_typing_are_counted_as_sessions():
     assert growth['dash'] == hl.TYPING_MINUTES * hl.ACTIVITY_PARAMS['typing']['dash']
 
 
+def test_walking_is_counted_by_steps():
+    """1,000歩＝3分。1万歩で30分相当を、スタミナ・パワーに配分する。"""
+    data = hl.load_stable(TODAY)
+    hl.log_walking(10000, today=TODAY, data=data, save=False)
+    growth = data['current']['growth']
+    minutes = 10000 / 1000 * hl.STEP_MINUTES_PER_1000
+    assert minutes == 30
+    assert growth['stamina'] == pytest.approx(minutes * hl.ACTIVITY_PARAMS['walking']['stamina'])
+    assert growth['power'] == pytest.approx(minutes * hl.ACTIVITY_PARAMS['walking']['power'])
+
+
 def test_add_growth_reports_what_went_up():
     data = hl.load_stable(TODAY)
     result = hl.add_growth('programming', 120, today=TODAY, data=data, save=False)
@@ -195,6 +206,25 @@ def test_realistic_week_does_not_leave_a_parameter_far_behind():
         'reading': 3 * 60,
         'training': 5 * hl.TRAINING_MINUTES,
         'typing': 5 * hl.TYPING_MINUTES,
+    }
+    growth = {p: 0.0 for p in hl.PARAMS}
+    for category, minutes in week.items():
+        for param, share in hl.ACTIVITY_PARAMS[category].items():
+            growth[param] += minutes * share * 4
+
+    values = list(hl.derive_params(growth).values())
+    assert max(values) / min(values) < 2.0, hl.derive_params(growth)
+
+
+def test_daily_walking_does_not_unbalance_a_realistic_week():
+    """⭕ 歩数は毎日入るので、筋トレ・タイピングと違って積み上がりが速い。毎日1万歩（1週で
+       210分相当）を足しても、スタミナ・パワーだけが突き抜けないこと。"""
+    week = {
+        'programming': 6 * 60,
+        'reading': 3 * 60,
+        'training': 5 * hl.TRAINING_MINUTES,
+        'typing': 5 * hl.TYPING_MINUTES,
+        'walking': 7 * 10000 / 1000 * hl.STEP_MINUTES_PER_1000,
     }
     growth = {p: 0.0 for p in hl.PARAMS}
     for category, minutes in week.items():

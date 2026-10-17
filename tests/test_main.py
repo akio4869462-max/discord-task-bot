@@ -9,6 +9,7 @@ import bot_state
 import horse_logic
 import main
 import task_logic
+import ui_common
 
 
 # ====================================================
@@ -164,6 +165,37 @@ def test_process_task_completion_for_daily_task_does_not_train_the_horse():
     stable = horse_logic.load_stable()
     assert all(v == 0 for v in stable['current']['growth'].values())
     assert not stable.get('current_streak')
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('8200', 8200),
+    ('8,200', 8200),       # カンマ区切り
+    ('８２００', 8200),     # 全角数字
+    ('8，200', 8200),       # 全角カンマ
+    (' 8200 ', 8200),
+    ('8200歩', None),
+    ('abc', None),
+    ('', None),
+])
+def test_parse_steps(text, expected):
+    import ui_training
+    assert ui_training.parse_steps(text) == expected
+
+
+def test_process_walking_trains_stamina_and_power():
+    detail, _ = ui_common.process_walking(10000)   # 10,000歩 = 30分相当
+
+    assert 'スタミナ' in detail
+    growth = horse_logic.load_stable()['current']['growth']
+    assert growth['stamina'] == pytest.approx(30 * horse_logic.ACTIVITY_PARAMS['walking']['stamina'])
+    assert growth['power'] == pytest.approx(30 * horse_logic.ACTIVITY_PARAMS['walking']['power'])
+
+
+def test_process_walking_with_nothing_new_to_credit_does_nothing():
+    detail, public = ui_common.process_walking(0)
+
+    assert detail == '' and public is None
+    assert all(v == 0 for v in horse_logic.load_stable()['current']['growth'].values())
 
 
 def test_process_task_completion_without_a_category_does_nothing():

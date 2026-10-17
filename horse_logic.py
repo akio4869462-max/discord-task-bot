@@ -67,6 +67,7 @@ ACTIVITY_PARAMS = {
     'reading': {'wit': 0.7, 'guts': 0.3},         # 📚 インプット・過去問演習
     'training': {'stamina': 0.5, 'power': 0.5},   # 💪 筋トレ
     'typing': {'dash': 0.7, 'speed': 0.3},        # ⌨️ タイピング訓練
+    'walking': {'stamina': 0.6, 'power': 0.4},    # 👟 歩数（筋トレと同じ能力を、毎日の積み重ねで育てる）
     # ⭕ 旧・就活RPGの「書類作成」。UIからは消したが、古いタスクが完了されたときに
     #    落ちないよう対応だけ残す。
     'document': {'guts': 1.0},
@@ -80,6 +81,10 @@ ACTIVITY_PARAMS = {
 # 律速の能力が賢さ（インプット）に移るだけで差は縮まらないので、60で止める。
 TRAINING_MINUTES = 60
 TYPING_MINUTES = 60
+# ⭕ 歩数は1,000歩＝3分（1万歩で30分相当）。歩くのは意識して時間を割く筋トレより受け身の
+# 活動なので、同じ1日でも筋トレ（60分相当）より低く見積もる。1日に数える上限は
+# steps_logic.STEPS_DAILY_CAP（15,000歩＝45分相当）。
+STEP_MINUTES_PER_1000 = 3
 
 RETIRE_STARTS = 20          # 何戦（出走枠）で引退するか
 # ⭕ 多頭化：主戦馬1頭＋併せ馬（最大2頭）。記録は主戦に全部入り、併せ馬には同じ記録の
@@ -553,6 +558,12 @@ def log_training(today=None, data=None, save=True, update_streak=True):
 def log_typing(today=None, data=None, save=True, update_streak=True):
     """タイピング1ドリル。同じく回数で換算する。"""
     return add_growth('typing', TYPING_MINUTES, today=today, data=data,
+                      save=save, update_streak=update_streak)
+
+
+def log_walking(steps, today=None, data=None, save=True, update_streak=True):
+    """歩数を調教に換算します。steps は「調教に新しく数える歩数」（steps_logic.log_steps の戻り値）。"""
+    return add_growth('walking', steps / 1000 * STEP_MINUTES_PER_1000, today=today, data=data,
                       save=save, update_streak=update_streak)
 
 

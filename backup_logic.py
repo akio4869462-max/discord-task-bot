@@ -30,6 +30,7 @@ BACKUP_TARGETS = (
     'review_data.json',     # 復習ノート（間違えた問題・キーワード）
     'training_data.json',   # トレーニングログ・体組成
     'typing_data.json',     # タイピング記録
+    'steps_data.json',      # 歩数の記録
     'news_keywords.json',   # ニュース検索キーワード
 )
 

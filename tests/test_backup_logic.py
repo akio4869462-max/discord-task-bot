@@ -28,6 +28,13 @@ assert MONDAY.weekday() == 0
 # 秘密鍵の混入防止（最重要）
 # ====================================================
 
+def test_backup_targets_include_every_user_record_file():
+    """⭕ データはEC2にしか無い。記録ファイルを足したのにここへ足し忘れると、バックアップから
+       黙って漏れて、復元しても戻らない。"""
+    for name in ('steps_data.json', 'training_data.json', 'typing_data.json'):
+        assert name in backup_logic.BACKUP_TARGETS
+
+
 def test_backup_targets_never_declare_credentials():
     """許可リストに秘密鍵が紛れ込んでいないことを、設定レベルで固定する。"""
     assert 'service_account.json' not in backup_logic.BACKUP_TARGETS

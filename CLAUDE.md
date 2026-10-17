@@ -51,6 +51,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `review_logic.py` | 過去問の復習ノート（間違えた問題・キーワード・復習の4段階） | `data/review_data.json` |
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
+| `steps_logic.py` | 日ごとの歩数の記録（同じ日の再入力は差分だけを調教に数える） | `data/steps_data.json` |
 | `calendar_logic.py` | Googleカレンダーへの期限同期（任意） | `data/service_account.json` |
 
 `main.py` は約1,100行あり、機能追加のたびに UI クラスとコマンド定義が積み上がる構造になっている。分割は未着手。

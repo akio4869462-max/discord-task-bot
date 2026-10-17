@@ -4,10 +4,28 @@ import discord
 from discord import app_commands
 from discord.ui import View
 
+import steps_logic
 import training_logic
-from ui_common import process_session
+from ui_common import process_session, process_walking
 from bot_state import tree
-from ui_common import parse_float
+from ui_common import parse_float, parse_positive_int
+
+
+def parse_steps(text):
+    """歩数の入力文字列を整数に変換します。カンマ区切り（8,200）や全角数字も受け付けます。"""
+    return parse_positive_int(str(text).replace(',', '').replace('，', ''))
+
+
+async def record_steps(interaction, steps):
+    """歩数を記録し、調教に新しく数えられる分があれば馬に反映して返信します。
+
+    モーダルとスラッシュコマンドの両方から呼び、返信の組み立てを一本化している。
+    """
+    msg, credit = steps_logic.log_steps(steps)
+    detail, public_msg = process_walking(credit)
+    await interaction.response.send_message(msg + detail, ephemeral=True)
+    if public_msg:
+        await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
 
 
 class TrainingMenuView(View):
@@ -45,6 +63,23 @@ class TrainingMenuView(View):
     @discord.ui.button(label="📈 体組成の履歴", style=discord.ButtonStyle.secondary, row=1)
     async def history_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(training_logic.get_measurement_history(), ephemeral=True)
+
+    @discord.ui.button(label="👟 歩数を記録", style=discord.ButtonStyle.secondary, row=1)
+    async def steps_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(StepsModal())
+
+
+class StepsModal(discord.ui.Modal, title='👟 今日の歩数'):
+    """今日の合計歩数の入力モーダル（/training steps のボタン版）"""
+    steps_input = discord.ui.TextInput(
+        label='今日の合計歩数', placeholder='例: 8200（途中で何度書き直してもOK）', required=True, max_length=8)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        steps = parse_steps(self.steps_input.value)
+        if steps is None:
+            await interaction.response.send_message("歩数は数字で入力してください！", ephemeral=True)
+            return
+        await record_steps(interaction, steps)
 
 
 class TrainingMeasureModal(discord.ui.Modal, title='📏 体組成の記録'):
@@ -101,7 +136,7 @@ async def send_training_notification(channel):
 
 
 # ====================================================
-# 💪 トレーニング記録コマンド群（/training menu, log, measure, history）
+# 💪 トレーニング記録コマンド群（/training menu, log, measure, steps, history）
 # ====================================================
 training_group = app_commands.Group(name="training", description="自宅ダンベルトレーニングの記録")
 
@@ -134,6 +169,12 @@ async def training_log_command(interaction: discord.Interaction, note: str = Non
 @app_commands.describe(weight_kg="体重(kg)", waist_cm="お腹周り(cm)")
 async def training_measure_command(interaction: discord.Interaction, weight_kg: float, waist_cm: float):
     await interaction.response.send_message(training_logic.log_measurement(weight_kg, waist_cm), ephemeral=True)
+
+
+@training_group.command(name="steps", description="今日の合計歩数を記録します（何度書き直してもOK）")
+@app_commands.describe(steps="今日の合計歩数")
+async def training_steps_command(interaction: discord.Interaction, steps: int):
+    await record_steps(interaction, steps)
 
 
 @training_group.command(name="history", description="体組成の記録一覧を表示します")

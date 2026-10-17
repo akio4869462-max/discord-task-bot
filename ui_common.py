@@ -139,6 +139,17 @@ def process_session(kind):
     return build_growth_message(result)
 
 
+def process_walking(credit_steps):
+    """歩数の記録を調教として反映します。credit_steps は新しく数える歩数（0なら何もしない）。
+
+    Returns:
+        tuple: (detail_msg, public_msg)
+    """
+    if credit_steps <= 0:
+        return "", None
+    return build_growth_message(horse_logic.log_walking(credit_steps))
+
+
 async def try_sync_to_calendar(task_text, category, deadline_str):
     """期限が指定されていれば、Googleカレンダーにも予定を同期します。
 
