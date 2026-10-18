@@ -166,6 +166,12 @@ async def xml_news_delivery_task():
         if task_channel is not None:
             await send_training_notification(task_channel)
 
+        # ⭐ 気になるゲームの発売が近いとき・予約が始まった日は知らせる（無ければ送らない）
+        if task_channel is not None:
+            watch_alert = game_logic.build_watch_alerts(now_jst.date())
+            if watch_alert:
+                await task_channel.send(watch_alert)
+
         # 📚 復習ノートに復習対象があれば知らせる
         if task_channel is not None:
             review_notice = review_logic.build_morning_notice()
@@ -346,6 +352,16 @@ async def test_reminder_command(interaction: discord.Interaction):
 
     if task_channel:
         await send_training_notification(task_channel)
+
+        # 気になるゲームの通知（今日が7日前・前日・当日・予約開始日の作品が無いと空になる）
+        today = datetime.now(JST).date()
+        watch_alert = game_logic.build_watch_alerts(today)
+        await task_channel.send(
+            f"🧪 **【デバッグ】気になるゲームの朝の通知**\n"
+            f"{watch_alert or '（今日が通知の対象日になっている作品はありません）'}")
+        await task_channel.send(
+            game_logic.build_games_message(game_logic.load_releases(), today,
+                                           watched=game_logic.watched_keys(), only_watched=True))
 
     # 🏁 開催日かどうかに関わらず、開催日の告知もテスト発火できるようにする
     if task_channel:

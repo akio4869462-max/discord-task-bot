@@ -31,7 +31,8 @@ assert MONDAY.weekday() == 0
 def test_backup_targets_include_every_user_record_file():
     """⭕ データはEC2にしか無い。記録ファイルを足したのにここへ足し忘れると、バックアップから
        黙って漏れて、復元しても戻らない。"""
-    for name in ('steps_data.json', 'training_data.json', 'typing_data.json', 'game_releases.json'):
+    for name in ('steps_data.json', 'training_data.json', 'typing_data.json', 'game_releases.json',
+                 'game_watch.json'):
         assert name in backup_logic.BACKUP_TARGETS
 
 

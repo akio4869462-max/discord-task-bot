@@ -169,7 +169,9 @@ def log_session(note=None, now=None):
 
 ## 新作ゲーム紹介
 
-`/games`（機種・期間で絞り込み）と、月曜8:00のニュース配信への相乗り（`xml_news_delivery_task` の朝の分岐）で、PC / Switch / Switch 2 の発売予定を紹介する。今日から14日以内に発売される作品が無い週は何も送らない。`/test_reminder` で、曜日に関わらず月曜の紹介を試せる。
+`/games`（機種・期間で絞り込み）と、月曜8:00のニュース配信への相乗り（`xml_news_delivery_task` の朝の分岐）で、PC / Switch / Switch 2 の発売予定を紹介する。今日から14日以内に発売される作品が無い週は何も送らない。`/test_reminder` で、曜日に関わらず月曜の紹介と気になる作品の通知を試せる。
+
+**気になる作品**: `/games` の下のメニューで選ぶと `data/game_watch.json` に登録され（選び直すと外れる。画面に出ていない作品の登録は触らない）、毎朝8:00に、発売の7日前・前日・当日と、予約開始日だけを通知チャンネルへ知らせる。`/games watching:True` で、気になる作品だけを備考・予約の状況つきで見られる。⭕ 登録はタイトルで覚える（日付で覚えると延期のたびに外れる）。通知は毎朝1回だけ呼ばれる前提で、送った記録は持たない（対象日に当たる作品だけを拾う）ので、その朝Botが止まっていると、その日の通知は飛ぶ。
 
 発売予定は2か所から読み、同じ（タイトル, 発売日）なら `data/` 側が優先される。
 
@@ -178,7 +180,7 @@ def log_session(note=None, now=None):
 | `seed/game_releases.json` | 初期データ（22作品）。各エントリに出典URL（`source`）と、全体の更新日（`updated`） | Git管理。Dockerイメージに入る |
 | `data/game_releases.json` | 自分で書き足す分 | Git管理外。EC2ではホスト側に残り、バックアップ対象 |
 
-エントリは `title` / `platforms`（`PC`・`Switch`・`Switch 2`）/ `release_date`（`YYYY-MM-DD`）が必須で、日付が未定なら `release_date` の代わりに `release_label`（例: `2026年内`）を書く。`genre`・`note` は任意。書き間違い（機種名の typo など）のあるエントリは**黙って表示されなくなる**ので、seed は `tests/test_game_logic.py` が全件の読み込みを検査している。
+エントリは `title` / `platforms`（`PC`・`Switch`・`Switch 2`）/ `release_date`（`YYYY-MM-DD`）が必須で、日付が未定なら `release_date` の代わりに `release_label`（例: `2026年内`）を書く。`genre`・`note` は任意。予約の情報は `preorder_start`（予約開始日）と `preorder_note`（特典・価格など）で、**載っていない作品は「予約できない」ではなく「未確認」**として何も表示しない。seed の予約情報には出典（`preorder_source`）を必ず付ける。機種ごとに発売日が違う作品（Steam版だけ1日遅い等）は、日付を分けず `note` に書く。書き間違い（機種名の typo など）のあるエントリは**黙って表示されなくなる**ので、seed は `tests/test_game_logic.py` が全件の読み込みを検査している。
 
 ⭕ 発売予定は先に進むほど古くなる。seed の日付は2026-10-18時点の調査（ファミ通・VGC・各社発表）で、延期されることがある。更新しないと月曜の紹介は黙って空になっていくので、定期的に seed を見直すこと。
 

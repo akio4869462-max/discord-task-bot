@@ -32,6 +32,7 @@ BACKUP_TARGETS = (
     'typing_data.json',     # タイピング記録
     'steps_data.json',      # 歩数の記録
     'game_releases.json',   # 新作ゲームの発売予定（自分で書き足した分）
+    'game_watch.json',      # 気になる新作ゲームの登録
     'news_keywords.json',   # ニュース検索キーワード
 )
 
