@@ -1,0 +1,173 @@
+{
+  "updated": "2026-10-18",
+  "releases": [
+    {
+      "title": "Final Fantasy Resonance",
+      "platforms": ["PC", "Switch", "Switch 2"],
+      "release_date": "2026-10-22",
+      "genre": "HD-2D RPG",
+      "note": "FF初のHD-2D RPG。Steam版の発売は10/23。第1章の体験版があり、セーブデータを引き継げる",
+      "source": "https://www.gematsu.com/2026/06/hd-2d-rpg-final-fantasy-resonance-announced-for-ps5-xbox-series-switch-2-switch-and-pc",
+      "preorder_start": "2026-07-16",
+      "preorder_note": "Switch 2 / Switch版のダウンロード版。特典は魔導アーマーの鍵・魔人の秘伝書（内容は変わることがある）",
+      "preorder_source": "https://saiganak.com/ja/news/ffrs-2nd-trailer-switch2-switch-reservation-announcement/"
+    },
+    {
+      "title": "Nintendo Switch Sports Resort",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-10-22",
+      "genre": "スポーツ",
+      "note": "Switch 2専用。ボクシング・卓球・アーチェリー・テニスなど",
+      "source": "https://www.shacknews.com/article/149558/nintendo-switch-sports-resort-reveal-release-date",
+      "preorder_note": "発表時から予約受付中",
+      "preorder_source": "https://www.shacknews.com/article/149558/nintendo-switch-sports-resort-reveal-release-date"
+    },
+    {
+      "title": "Fatal Fury: City of the Wolves",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-10-22",
+      "genre": "格闘ゲーム",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Call of Duty: Modern Warfare 4",
+      "platforms": ["PC", "Switch 2"],
+      "release_date": "2026-10-23",
+      "genre": "FPS",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "One Piece: Grand Gourmet",
+      "platforms": ["PC", "Switch", "Switch 2"],
+      "release_date": "2026-10-23",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Hello Kitty Party Land",
+      "platforms": ["Switch", "Switch 2"],
+      "release_date": "2026-10-29",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "The Legend of Zelda: Ocarina of Time (リメイク)",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-11-05",
+      "genre": "アクションアドベンチャー",
+      "note": "ジャンプボタンの追加や、店・屋内へのシームレスな移動など",
+      "source": "https://www.gameinformer.com/nintendo-direct/2026/09/08/the-legend-of-zelda-ocarina-of-time-remake-launches-this-november",
+      "preorder_note": "パッケージ版・ダウンロード版とも予約受付中",
+      "preorder_source": "https://gamepedia.jp/archives/114340"
+    },
+    {
+      "title": "Stellar Blade",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-11-06",
+      "genre": "アクション",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Minecraft Dungeons II",
+      "platforms": ["Switch"],
+      "release_date": "2026-11-10",
+      "source": "https://www.famitsu.com/schedule/switch/202611"
+    },
+    {
+      "title": "Metaphor: ReFantazio",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-11-12",
+      "genre": "RPG",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Pikmin 4: Nintendo Switch 2 Edition + Dandori Academy",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-11-12",
+      "note": "新モード「Dandori Academy」を追加。マイクで相棒に声で指示できる",
+      "source": "https://gameinformer.com/product/pikmin-4-nintendo-switch-2-edition-dandori-academy",
+      "preorder_note": "パッケージ版は予約受付中。Switch版の所有者向けにアップグレードパックもある",
+      "preorder_source": "https://www.nettosgameroom.com/2026/09/pikmin-4-nintendo-switch-2-edition.html"
+    },
+    {
+      "title": "SONIC PICO PARK",
+      "platforms": ["PC", "Switch", "Switch 2"],
+      "release_date": "2026-11-12",
+      "source": "https://www.famitsu.com/schedule/switch/202611"
+    },
+    {
+      "title": "Hela",
+      "platforms": ["PC", "Switch 2"],
+      "release_date": "2026-12-01",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "ドラゴンクエストモンスターズ4 枯れ木の国のビアンカ・フローラ",
+      "platforms": ["PC", "Switch", "Switch 2"],
+      "release_date": "2026-12-03",
+      "genre": "モンスターRPG",
+      "note": "Steam版は12/4発売。ダウンロード版は発売から48時間のアーリーアクセス権つき",
+      "source": "https://www.famitsu.com/schedule/switch/202612",
+      "preorder_start": "2026-06-10",
+      "preorder_note": "店舗ごとに予約特典あり",
+      "preorder_source": "https://saiganak.com/ja/news/dragonquest-monsters4-release-date/"
+    },
+    {
+      "title": "Xenoblade Chronicles 3 Nintendo Switch 2 Edition",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-12-03",
+      "genre": "RPG",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Warhammer 40,000: Dawn of War IV",
+      "platforms": ["PC"],
+      "release_date": "2026-12-03",
+      "genre": "RTS",
+      "note": "PC専用。9/17から延期。Commander Editionは11/30から先行プレイ",
+      "source": "https://www.invenglobal.com/articles/24743/dawn-of-war-iv-release-delayed-to-december-3-focusing-on-quality"
+    },
+    {
+      "title": "Rayman Legends Retold",
+      "platforms": ["PC", "Switch 2"],
+      "release_date": "2026-12-03",
+      "genre": "アクション",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "Monster Hunter Wilds (Switch 2版)",
+      "platforms": ["Switch 2"],
+      "release_date": "2026-12-04",
+      "genre": "ハンティングアクション",
+      "note": "最大4人のローカル通信に対応。これまでの無料アップデートを収録。体験版は10/20配信（製品版へセーブデータを引き継げる）",
+      "source": "https://www.gematsu.com/2026/09/monster-hunter-wilds-for-switch-2-launches-december-4",
+      "preorder_start": "2026-09-10",
+      "preorder_note": "ダウンロード版は早期購入の特別価格あり（2027/1/7まで）",
+      "preorder_source": "https://www.gamespark.jp/release/prtimes/20260910/312907.html"
+    },
+    {
+      "title": "レイトン教授と蒸気の新世界",
+      "platforms": ["PC", "Switch", "Switch 2"],
+      "release_date": "2026-12-10",
+      "genre": "謎解きアドベンチャー",
+      "source": "https://www.famitsu.com/schedule/switch/202612"
+    },
+    {
+      "title": "Attack on Titan 3",
+      "platforms": ["PC", "Switch 2"],
+      "release_date": "2026-12-10",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    },
+    {
+      "title": "うたの☆プリンスさまっ♪ Shining Live for Nintendo Switch",
+      "platforms": ["Switch"],
+      "release_date": "2026-12-17",
+      "source": "https://www.famitsu.com/schedule/switch/202612"
+    },
+    {
+      "title": "The Duskbloods",
+      "platforms": ["Switch 2"],
+      "release_label": "2026年内（日付は未定）",
+      "note": "FromSoftware制作のSwitch 2専用タイトル",
+      "source": "https://www.videogameschronicle.com/news/new-game-release-dates/"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ from discord.ext import tasks
 from discord.ui import View
 
 import exam_logic
+import game_logic
 import heartbeat_logic
 import horse_logic
 import news_logic
@@ -42,6 +43,7 @@ import ui_training
 import ui_typing
 import ui_utility
 import ui_fortune
+import ui_game
 from ui_task import TaskSelectCombinedView
 from ui_horse import StableMenuView, run_pending_race
 from ui_news import NewsTermsMenuView
@@ -140,6 +142,13 @@ async def xml_news_delivery_task():
         if news_channel is not None:
             news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
+
+            # 🎮 月曜朝は、近日発売の新作ゲームも紹介する（無ければ送らない）
+            # ⭕ 定期配信のループは1つだけ、という既存のルールを守り、朝の分岐に相乗りする。
+            if now_jst.weekday() == 0:
+                games_msg = game_logic.build_weekly_digest(now_jst.date())
+                if games_msg:
+                    await news_channel.send(games_msg)
         else:
             print(f"⚠️ [定期配信] ニュースチャンネルが見つかりませんでした。")
 
@@ -156,6 +165,12 @@ async def xml_news_delivery_task():
         # 💪 今日のトレーニングメニューも配信
         if task_channel is not None:
             await send_training_notification(task_channel)
+
+        # ⭐ 気になるゲームの発売が近いとき・予約が始まった日は知らせる（無ければ送らない）
+        if task_channel is not None:
+            watch_alert = game_logic.build_watch_alerts(now_jst.date())
+            if watch_alert:
+                await task_channel.send(watch_alert)
 
         # 📚 復習ノートに復習対象があれば知らせる
         if task_channel is not None:
@@ -324,6 +339,11 @@ async def test_reminder_command(interaction: discord.Interaction):
     if news_channel:
         await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
 
+        # 曜日に関わらず、月曜の新作ゲーム紹介もテスト発火できるようにする
+        games_msg = game_logic.build_weekly_digest()
+        await news_channel.send(
+            f"🧪 **【デバッグ】月曜朝の新作ゲーム紹介**\n{games_msg or '（今日から14日以内の発売予定がないため、本番では送られません）'}")
+
     reminder_tasks = build_deadline_reminders(datetime.now(JST).date())
     if task_channel and reminder_tasks:
         await task_channel.send(f"🧪 **【デバッグリマインダー】**\n締切が近づいているタスクがあります！\n\n" + "\n".join(reminder_tasks))
@@ -332,6 +352,16 @@ async def test_reminder_command(interaction: discord.Interaction):
 
     if task_channel:
         await send_training_notification(task_channel)
+
+        # 気になるゲームの通知（今日が7日前・前日・当日・予約開始日の作品が無いと空になる）
+        today = datetime.now(JST).date()
+        watch_alert = game_logic.build_watch_alerts(today)
+        await task_channel.send(
+            f"🧪 **【デバッグ】気になるゲームの朝の通知**\n"
+            f"{watch_alert or '（今日が通知の対象日になっている作品はありません）'}")
+        await task_channel.send(
+            game_logic.build_games_message(game_logic.load_releases(), today,
+                                           watched=game_logic.watched_keys(), only_watched=True))
 
     # 🏁 開催日かどうかに関わらず、開催日の告知もテスト発火できるようにする
     if task_channel:
