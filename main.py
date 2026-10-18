@@ -11,6 +11,7 @@ from discord.ext import tasks
 from discord.ui import View
 
 import exam_logic
+import game_logic
 import heartbeat_logic
 import horse_logic
 import news_logic
@@ -42,6 +43,7 @@ import ui_training
 import ui_typing
 import ui_utility
 import ui_fortune
+import ui_game
 from ui_task import TaskSelectCombinedView
 from ui_horse import StableMenuView, run_pending_race
 from ui_news import NewsTermsMenuView
@@ -140,6 +142,13 @@ async def xml_news_delivery_task():
         if news_channel is not None:
             news_msg = await asyncio.to_thread(news_logic.get_it_news)
             await news_channel.send(f"⏰ **【定期ニュース配信】**\n{news_msg}")
+
+            # 🎮 月曜朝は、近日発売の新作ゲームも紹介する（無ければ送らない）
+            # ⭕ 定期配信のループは1つだけ、という既存のルールを守り、朝の分岐に相乗りする。
+            if now_jst.weekday() == 0:
+                games_msg = game_logic.build_weekly_digest(now_jst.date())
+                if games_msg:
+                    await news_channel.send(games_msg)
         else:
             print(f"⚠️ [定期配信] ニュースチャンネルが見つかりませんでした。")
 
@@ -323,6 +332,11 @@ async def test_reminder_command(interaction: discord.Interaction):
     news_msg = await asyncio.to_thread(news_logic.get_it_news)
     if news_channel:
         await news_channel.send(f"🧪 **【デバッグ配信】**\n{news_msg}")
+
+        # 曜日に関わらず、月曜の新作ゲーム紹介もテスト発火できるようにする
+        games_msg = game_logic.build_weekly_digest()
+        await news_channel.send(
+            f"🧪 **【デバッグ】月曜朝の新作ゲーム紹介**\n{games_msg or '（今日から14日以内の発売予定がないため、本番では送られません）'}")
 
     reminder_tasks = build_deadline_reminders(datetime.now(JST).date())
     if task_channel and reminder_tasks:

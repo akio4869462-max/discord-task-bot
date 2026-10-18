@@ -52,6 +52,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
 | `steps_logic.py` | 日ごとの歩数の記録（同じ日の再入力は差分だけを調教に数える） | `data/steps_data.json` |
+| `game_logic.py` | 新作ゲーム（PC/Switch/Switch 2）の発売予定の読み込み・絞り込み・整形 | `seed/game_releases.json`（初期データ）＋ `data/game_releases.json`（追記分） |
 | `calendar_logic.py` | Googleカレンダーへの期限同期（任意） | `data/service_account.json` |
 
 `main.py` は約1,100行あり、機能追加のたびに UI クラスとコマンド定義が積み上がる構造になっている。分割は未着手。
@@ -165,6 +166,21 @@ def log_session(note=None, now=None):
 ⭕ このワークフローは検知してもジョブ自体は失敗させない（exit 0で終了）。毎回赤いXが並ぶと通知疲れするため、异常の知らせはDiscordへの一本化だけにしている。
 
 ⭕ Bot側も`main.py`の`tree.error`・`client.on_error`・各`@tasks.loop`の`.error`ハンドラで、想定外の例外を`ALERT_CHANNEL_ID`へ通知する。個々の処理（バックアップ失敗の通知など）が捕捉済みの例外とは別に、「保険をすり抜けた想定外の例外」を拾う最後の砂として入れてある。
+
+## 新作ゲーム紹介
+
+`/games`（機種・期間で絞り込み）と、月曜8:00のニュース配信への相乗り（`xml_news_delivery_task` の朝の分岐）で、PC / Switch / Switch 2 の発売予定を紹介する。今日から14日以内に発売される作品が無い週は何も送らない。`/test_reminder` で、曜日に関わらず月曜の紹介を試せる。
+
+発売予定は2か所から読み、同じ（タイトル, 発売日）なら `data/` 側が優先される。
+
+| ファイル | 中身 | 管理 |
+|---|---|---|
+| `seed/game_releases.json` | 初期データ（22作品）。各エントリに出典URL（`source`）と、全体の更新日（`updated`） | Git管理。Dockerイメージに入る |
+| `data/game_releases.json` | 自分で書き足す分 | Git管理外。EC2ではホスト側に残り、バックアップ対象 |
+
+エントリは `title` / `platforms`（`PC`・`Switch`・`Switch 2`）/ `release_date`（`YYYY-MM-DD`）が必須で、日付が未定なら `release_date` の代わりに `release_label`（例: `2026年内`）を書く。`genre`・`note` は任意。書き間違い（機種名の typo など）のあるエントリは**黙って表示されなくなる**ので、seed は `tests/test_game_logic.py` が全件の読み込みを検査している。
+
+⭕ 発売予定は先に進むほど古くなる。seed の日付は2026-10-18時点の調査（ファミ通・VGC・各社発表）で、延期されることがある。更新しないと月曜の紹介は黙って空になっていくので、定期的に seed を見直すこと。
 
 ## 実装上の注意
 
