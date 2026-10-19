@@ -139,15 +139,21 @@ def process_session(kind):
     return build_growth_message(result)
 
 
-def process_walking(credit_steps):
+def process_walking(credit_steps, today=None, update_streak=True):
     """歩数の記録を調教として反映します。credit_steps は新しく数える歩数（0なら何もしない）。
+
+    Args:
+        today (date, optional): どの日の歩数か。省略時は今日。
+        update_streak (bool): 連続記録を更新するか。⭕ 昨日ぶんの歩数を翌朝に取り込むときは
+            False。連続記録は「今日やったか」の指標なので、今日の記録として扱ってはいけない。
 
     Returns:
         tuple: (detail_msg, public_msg)
     """
     if credit_steps <= 0:
         return "", None
-    return build_growth_message(horse_logic.log_walking(credit_steps))
+    return build_growth_message(
+        horse_logic.log_walking(credit_steps, today=today, update_streak=update_streak))
 
 
 async def try_sync_to_calendar(task_text, category, deadline_str):
