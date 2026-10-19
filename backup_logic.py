@@ -37,7 +37,7 @@ BACKUP_TARGETS = (
 )
 
 # 許可リストに万一混ざっても弾く二重の防波堤
-DENYLIST = ('service_account.json',)
+DENYLIST = ('service_account.json', 'google_health_token.json')
 
 # ホスト上に残すZIPの世代数。⭕ 日次にしたので、1週間ぶん＋復元前の退避が残る程度にする
 KEEP_ARCHIVES = 10

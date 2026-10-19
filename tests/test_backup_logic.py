@@ -36,31 +36,39 @@ def test_backup_targets_include_every_user_record_file():
         assert name in backup_logic.BACKUP_TARGETS
 
 
-def test_backup_targets_never_declare_credentials():
-    """許可リストに秘密鍵が紛れ込んでいないことを、設定レベルで固定する。"""
-    assert 'service_account.json' not in backup_logic.BACKUP_TARGETS
+# バックアップに絶対に入れない、秘密情報のファイル（Googleの秘密鍵・健康データを読めるトークン）
+CREDENTIAL_FILES = ('service_account.json', 'google_health_token.json')
 
 
-def test_create_archive_never_includes_service_account(isolated_data_dir):
-    """★秘密鍵がZIPへ混入しないことの回帰テスト（最重要）。"""
+@pytest.mark.parametrize('name', CREDENTIAL_FILES)
+def test_backup_targets_never_declare_credentials(name):
+    """許可リストに秘密情報が紛れ込んでいないことを、設定レベルで固定する。"""
+    assert name not in backup_logic.BACKUP_TARGETS
+    assert name in backup_logic.DENYLIST
+
+
+@pytest.mark.parametrize('name', CREDENTIAL_FILES)
+def test_create_archive_never_includes_credentials(isolated_data_dir, name):
+    """★秘密情報がZIPへ混入しないことの回帰テスト（最重要）。"""
     _write(isolated_data_dir, 'todo.json', '[]')
-    _write(isolated_data_dir, 'service_account.json', '{"private_key": "SECRET"}')
+    _write(isolated_data_dir, name, '{"private_key": "SECRET"}')
 
     zip_path, included, _ = backup_logic.create_archive()
 
-    assert 'service_account.json' not in included
+    assert name not in included
     with zipfile.ZipFile(zip_path) as archive:
-        assert 'service_account.json' not in archive.namelist()
+        assert name not in archive.namelist()
 
 
-def test_denylist_wins_even_if_accidentally_added_to_targets(isolated_data_dir, monkeypatch):
+@pytest.mark.parametrize('name', CREDENTIAL_FILES)
+def test_denylist_wins_even_if_accidentally_added_to_targets(isolated_data_dir, monkeypatch, name):
     """許可リストに誤って追加されても、DENYLISTが二重の防波堤として弾く。"""
-    monkeypatch.setattr(backup_logic, 'BACKUP_TARGETS', backup_logic.BACKUP_TARGETS + ('service_account.json',))
-    _write(isolated_data_dir, 'service_account.json', '{"private_key": "SECRET"}')
+    monkeypatch.setattr(backup_logic, 'BACKUP_TARGETS', backup_logic.BACKUP_TARGETS + (name,))
+    _write(isolated_data_dir, name, '{"private_key": "SECRET"}')
 
     found, _ = backup_logic.collect_targets()
 
-    assert not any(p.endswith('service_account.json') for p in found)
+    assert not any(p.endswith(name) for p in found)
 
 
 # ====================================================

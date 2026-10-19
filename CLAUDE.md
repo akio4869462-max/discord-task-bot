@@ -52,6 +52,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
 | `steps_logic.py` | 日ごとの歩数の記録（同じ日の再入力は差分だけを調教に数える） | `data/steps_data.json` |
+| `google_health_logic.py` | Google Health API から日ごとの歩数を取り込む（認証・取得・`steps_logic` への流し込み） | `data/google_health_token.json`（秘密情報。バックアップ対象外） |
 | `game_logic.py` | 新作ゲーム（PC/Switch/Switch 2）の発売予定の読み込み・絞り込み・整形 | `seed/game_releases.json`（初期データ）＋ `data/game_releases.json`（追記分） |
 | `calendar_logic.py` | Googleカレンダーへの期限同期（任意） | `data/service_account.json` |
 
@@ -166,6 +167,17 @@ def log_session(note=None, now=None):
 ⭕ このワークフローは検知してもジョブ自体は失敗させない（exit 0で終了）。毎回赤いXが並ぶと通知疲れするため、异常の知らせはDiscordへの一本化だけにしている。
 
 ⭕ Bot側も`main.py`の`tree.error`・`client.on_error`・各`@tasks.loop`の`.error`ハンドラで、想定外の例外を`ALERT_CHANNEL_ID`へ通知する。個々の処理（バックアップ失敗の通知など）が捕捉済みの例外とは別に、「保険をすり抜けた想定外の例外」を拾う最後の砂として入れてある。
+
+## 歩数の自動取り込み（Google Health）
+
+`data/google_health_token.json`（client_id / client_secret / refresh_token）があれば、**毎晩20:00に今日の途中経過、翌朝8:00に昨日の確定値**を Google Health API の `dailyRollUp` で取得し、手入力と同じ `steps_logic.log_steps` に流す（既存の定期配信の分岐に相乗り）。ファイルが無ければ何もしない。`/training sync_steps` で今すぐ取り込める。認証は `tools/google_health_auth.py` で1回だけ通す（手順はスクリプトの冒頭）。
+
+- ⭕ **同意画面の公開ステータスを「本番環境」にする。** 「テスト」のままだとリフレッシュトークンが7日で切れ、毎週認証をやり直すことになる。切れたときは `invalid_grant` としてアラートチャンネルに届く。
+- ⭕ **`token.json` は健康データを読める秘密情報。** `/data/` でGit管理外、`backup_logic.DENYLIST` でバックアップにも決して入れない（テストで固定）。エラー文にもトークン類を載せない。
+- ⭕ **「データが無い」は0歩ではない。** 端末が未同期の日はAPIが何も返さないので、何も記録しない（`None`）。0歩として記録しない。
+- ⭕ 同じ日の合計を何度取り込んでも、`steps_logic` が差分だけを数えるので二重加算されない（20:00の途中経過→翌朝の確定値、手入力との併用も同じ）。昨日ぶんの取り込みは連続記録（streak）を動かさない（`process_walking(update_streak=False)`）。
+- ⭕ **取り込みの失敗は `main.sync_steps_or_alert` で必ず受け止める。** 配信ループは全機能で1つを共有しているため、ここから例外が漏れるとニュースもレース実行もループごと止まる。
+- 通信は標準ライブラリの `urllib`（依存を増やさない）で、`asyncio.to_thread` から呼ぶ。エンドポイントやリクエストの形は公式ドキュメント（`developers.google.com/health`）による。このAPIは発展途中で、変更に追従が必要になることがある。
 
 ## 新作ゲーム紹介
 

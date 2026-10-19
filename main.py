@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # 環境変数の読み込み（calendar_logic等がモジュール読み込み時に環境変数を参照するため、
@@ -12,6 +12,7 @@ from discord.ui import View
 
 import exam_logic
 import game_logic
+import google_health_logic
 import heartbeat_logic
 import horse_logic
 import news_logic
@@ -48,7 +49,7 @@ from ui_task import TaskSelectCombinedView
 from ui_horse import StableMenuView, run_pending_race
 from ui_news import NewsTermsMenuView
 from ui_exam import ExamMenuView
-from ui_training import TrainingMenuView, DailyLogView, send_training_notification
+from ui_training import TrainingMenuView, DailyLogView, send_training_notification, post_google_health_steps
 from ui_typing import TypingMenuView, TypingLogView, send_typing_notification
 from ui_utility import UtilityMenuView, daily_backup_task
 
@@ -111,6 +112,23 @@ async def alert(message):
         print(f"⚠️ [alert] 通知の送信に失敗しました: {type(error).__name__}: {error}")
 
 
+async def sync_steps_or_alert(channel, day, is_today):
+    """Google Health の歩数を取り込む。失敗しても、ほかの定期配信を止めない。
+
+    ⭕ 任意の連携なので、どんな失敗もここで受け止めてアラートだけ送る。定期配信のループは
+       1つを全機能で共有しているため、ここで例外を漏らすとループごと止まってしまう。
+    """
+    if channel is None or not google_health_logic.is_configured():
+        return
+    try:
+        await post_google_health_steps(channel, day, is_today)
+    except google_health_logic.GoogleHealthError as error:
+        await alert(f"⚠️ **【歩数の自動取り込み】** {error}")
+    except Exception as error:
+        print(f"❌ [歩数の自動取り込み] 想定外のエラー: {type(error).__name__}: {error}")
+        await alert(f"❌ **【歩数の自動取り込み】想定外のエラー**\n`{type(error).__name__}: {error}`")
+
+
 def _register_loop_alert(loop_task, label):
     """定期タスクで捕捉されなかった例外を、ログ出力とアラート通知の両方につなぐ。
 
@@ -166,6 +184,9 @@ async def xml_news_delivery_task():
         if task_channel is not None:
             await send_training_notification(task_channel)
 
+        # 👟 昨日の歩数の確定値を、Google Healthから取り込む（未設定なら何もしない）
+        await sync_steps_or_alert(task_channel, now_jst.date() - timedelta(days=1), is_today=False)
+
         # ⭐ 気になるゲームの発売が近いとき・予約が始まった日は知らせる（無ければ送らない）
         if task_channel is not None:
             watch_alert = game_logic.build_watch_alerts(now_jst.date())
@@ -204,6 +225,9 @@ async def xml_news_delivery_task():
         # ⌨️ タイピング訓練の日次メニューを配信
         if task_channel is not None:
             await send_typing_notification(task_channel)
+
+        # 👟 今日の歩数の途中経過を、Google Healthから取り込む（未設定なら何もしない）
+        await sync_steps_or_alert(task_channel, now_jst.date(), is_today=True)
 
         # 🏁 開催日（土曜・水曜）は登録してあるレースを実行する
         # ⭕ 定期配信のループは1つだけ、という既存のルールを守り、夜の分岐に相乗りする。

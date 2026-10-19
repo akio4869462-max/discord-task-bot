@@ -1,9 +1,13 @@
 """自宅ダンベルトレーニングまわりのView/Modal・定期通知・スラッシュコマンド群"""
 
+import asyncio
+from datetime import datetime
+
 import discord
 from discord import app_commands
 from discord.ui import View
 
+import google_health_logic
 import steps_logic
 import training_logic
 from ui_common import process_session, process_walking
@@ -26,6 +30,42 @@ async def record_steps(interaction, steps):
     await interaction.response.send_message(msg + detail, ephemeral=True)
     if public_msg:
         await interaction.channel.send(f"{interaction.user.mention} {public_msg}")
+
+
+async def import_google_health_steps(day, is_today):
+    """Google Health から day の歩数を取り込み、馬の調教にも反映します。
+
+    ⭕ 通信は別スレッドで行う（直接呼ぶとBot全体が固まる）。
+
+    Args:
+        day (date): 取り込む日。
+        is_today (bool): 今日の歩数か。昨日ぶんを翌朝に取り込むときは False
+            （連続記録を今日の記録として伸ばさないため）。
+
+    Returns:
+        dict/None: {'steps', 'credit', 'message', 'detail', 'public'}。
+                   その日のデータがまだ Google Health に無ければ None。
+
+    Raises:
+        google_health_logic.GoogleHealthError: 認証切れ・通信失敗など。
+    """
+    result = await asyncio.to_thread(google_health_logic.sync_day, day)
+    if result is None:
+        return None
+    detail, public = process_walking(result['credit'], today=day, update_streak=is_today)
+    return {**result, 'detail': detail, 'public': public}
+
+
+async def post_google_health_steps(channel, day, is_today):
+    """定期配信用。新しく数える歩数があったときだけ、取り込んだことをチャンネルへ知らせます。"""
+    result = await import_google_health_steps(day, is_today)
+    if result is None or result['credit'] <= 0:
+        return
+
+    label = '今日' if is_today else '昨日'
+    await channel.send(f"👟 Google Health から{label}の歩数 {result['steps']:,}歩 を取り込みました。{result['detail']}")
+    if result['public']:
+        await channel.send(result['public'])
 
 
 class TrainingMenuView(View):
@@ -136,7 +176,7 @@ async def send_training_notification(channel):
 
 
 # ====================================================
-# 💪 トレーニング記録コマンド群（/training menu, log, measure, steps, history）
+# 💪 トレーニング記録コマンド群（/training menu, log, measure, steps, sync_steps, history）
 # ====================================================
 training_group = app_commands.Group(name="training", description="自宅ダンベルトレーニングの記録")
 
@@ -175,6 +215,39 @@ async def training_measure_command(interaction: discord.Interaction, weight_kg: 
 @app_commands.describe(steps="今日の合計歩数")
 async def training_steps_command(interaction: discord.Interaction, steps: int):
     await record_steps(interaction, steps)
+
+
+@training_group.command(name="sync_steps", description="Google Healthから今日の歩数を今すぐ取り込みます")
+async def training_sync_steps_command(interaction: discord.Interaction):
+    if not google_health_logic.is_configured():
+        await interaction.response.send_message(
+            "Google Healthとの連携は未設定です。`tools/google_health_auth.py` で認証すると使えます。"
+            "それまでは `/training steps` で手入力できます。", ephemeral=True)
+        return
+
+    # ⭕ Googleとの通信があり3秒以内に応答できないので、先に応答を保留する
+    await interaction.response.defer(ephemeral=True)
+    try:
+        result = await import_google_health_steps(datetime.now(steps_logic.JST).date(), True)
+    except google_health_logic.GoogleHealthError as e:
+        await interaction.followup.send(f"❌ 取り込めませんでした。{e}", ephemeral=True)
+        return
+
+    if result is None:
+        await interaction.followup.send(
+            "Google Healthに、今日の歩数がまだありません。端末の同期を待って、もう一度試してください。",
+            ephemeral=True)
+    elif result['message'].startswith('❌'):
+        await interaction.followup.send(result['message'], ephemeral=True)
+    elif result['credit'] <= 0:
+        await interaction.followup.send(
+            f"👟 今日は {result['steps']:,}歩 です。調教に新しく数える歩数はありません（取り込み済み）。",
+            ephemeral=True)
+    else:
+        await interaction.followup.send(
+            f"👟 今日の歩数 {result['steps']:,}歩 を取り込みました。{result['detail']}", ephemeral=True)
+        if result['public']:
+            await interaction.channel.send(f"{interaction.user.mention} {result['public']}")
 
 
 @training_group.command(name="history", description="体組成の記録一覧を表示します")
