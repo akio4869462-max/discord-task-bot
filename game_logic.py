@@ -5,7 +5,7 @@ PC / Switch / Switch 2 の発売予定を読み込み、絞り込み、Discord�
 
 データは2か所から読む。
   ・seed/game_releases.json … リポジトリに入っている初期データ（出典URLつき）
-  ・data/game_releases.json … 自分で書き足す分。Git管理外で、EC2ではホスト側に残る
+  ・data/game_releases.json … 自分で書き足す分。Git管理外で、本番サーバーではホスト側に残る
 同じ（タイトル, 発売日）が両方にあるときは data 側を優先する。形式は seed と同じ
 （エントリの配列、または {"releases": [...]} ）。
 

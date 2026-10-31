@@ -1,4 +1,4 @@
-name: Deploy Discord Bot to EC2
+name: Deploy Discord Bot to VPS
 
 on:
   push:

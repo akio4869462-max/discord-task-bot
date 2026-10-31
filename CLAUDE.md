@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-就活・応用情報の学習・筋トレ・タイピング訓練を1つに束ねた、個人利用のDiscord Bot。EC2上でDockerコンテナとして常時稼働している。
+就活・応用情報の学習・筋トレ・タイピング訓練を1つに束ねた、個人利用のDiscord Bot。さくらのVPS（Ubuntu 24.04・2GB）上でDockerコンテナとして常時稼働している（2026-10-31にAWS EC2から移行）。
 
 記録した活動は**競走馬の育成**に変換される。作業時間が能力になり、土曜と水曜に開催されるレースへ出走して着順を競う。設計と数字の根拠は `docs/RACE_DESIGN.md` にある。
 
@@ -129,26 +129,26 @@ def log_session(note=None, now=None):
 
 `main` への push で `.github/workflows/deploy.yml` が動く。**`deploy` ジョブは `needs: test` で `test` ジョブに依存**しており、テストが落ちると本番へ反映されない。`test.yml` は PR のみを対象にして二重実行を避けている。
 
-デプロイは EC2 に SSH して `git pull && docker compose up -d --build` を実行する。`data/` はホスト側にバインドマウントされており、コンテナを作り直しても残る（Git 管理外）。
+デプロイは本番サーバー（VPS）に SSH して `git pull && docker compose up -d --build` を実行する。`data/` はホスト側にバインドマウントされており、コンテナを作り直しても残る（Git 管理外）。
 
 ### 本番と開発の分離
 
-**このリポジトリの `.env` は開発用Bot（`task-bot-dev`）のもの。** 本番の認証情報は EC2 側の `.env` にしか無い。
+**このリポジトリの `.env` は開発用Bot（`task-bot-dev`）のもの。** 本番の認証情報は本番サーバー側の `.env` にしか無い。
 
 | | 読む設定 | 接続先Bot | チャンネル |
 |---|---|---|---|
 | ローカル | このリポジトリの `.env` | `task-bot-dev` | テストサーバー |
-| EC2（本番） | EC2上の `.env` | `TaskManagerBot` | 本番サーバー |
+| VPS（本番） | VPS上の `.env` | `TaskManagerBot` | 本番サーバー |
 
 したがって**ローカルでは `python main.py` をそのまま実行してよい**。本番との二重ログインは起こらない。
 
 ⭕ ここを「`.env` は本番のもの」と誤解すると、`.env.dev` を作って切り替える仕組みや、
    本番トークンとの一致を検出するガードといった、この構成では意味の無いものを足してしまう
-   （実際に一度作って捨てた）。データも `data/` がローカルとEC2で別々なので混ざらない。
+   （実際に一度作って捨てた）。データも `data/` がローカルとVPSで別々なので混ざらない。
 
 ## バックアップと復元
 
-`data/` はEC2にしか無いので、毎日8:10に `backup_logic` が許可リストのJSONをZIPにして
+`data/` は本番サーバーにしか無いので、毎日8:10に `backup_logic` が許可リストのJSONをZIPにして
 バックアップチャンネルへ添付する（`/backup` で手動も可）。戻すときはそのZIPを添付して
 `/restore` → 中身を確認 → 「このZIPで上書きする」。上書きの前に今の状態を
 `data/_backups/backup_<日付>_before-restore-<時刻>.zip` に退避するので1つ前に戻れる。
@@ -159,10 +159,10 @@ def log_session(note=None, now=None):
 
 ## 死活監視（heartbeat + watchdog）
 
-目的は「落ちたことに自分で気づける」だけ。OpenTelemetryのようなフル構成（Collector・Prometheus・Grafana）はEC2のスペックに対して重すぎると判断し、次の2つだけで構成している。
+目的は「落ちたことに自分で気づける」だけ。OpenTelemetryのようなフル構成（Collector・Prometheus・Grafana）はサーバー（2GB）のスペックに対して重すぎると判断し、次の2つだけで構成している。
 
 1. **heartbeat（`heartbeat_logic.py`）**: 5分おきに`data/heartbeat.txt`へ時刻を書くだけ。HTTPサーバーは立てない（新しいポート開放やセキュリティグループ変更を不要にするため）。
-2. **watchdog（`.github/workflows/watchdog.yml`）**: 15分おきに既存のEC2_HOST/EC2_USER/EC2_SSH_KEYでSSHし、heartbeatの新しさ・discord-task-botコンテナの起動状態・keiba-app-newの`/api/v1`応答を確認する。異常時はDiscordのWebhook（`DISCORD_ALERT_WEBHOOK`シークレット）へ直接通知する。Botプロセス自体が死んでいてもこの経路は生きている。
+2. **watchdog（`.github/workflows/watchdog.yml`）**: 15分おきに既存のEC2_HOST/EC2_USER/EC2_SSH_KEYでSSHし（Secret名は移行前の名残で、中身はVPSの値）、heartbeatの新しさ・discord-task-botコンテナの起動状態・keiba-app-newの`/api/v1`応答を確認する。異常時はDiscordのWebhook（`DISCORD_ALERT_WEBHOOK`シークレット）へ直接通知する。Botプロセス自体が死んでいてもこの経路は生きている。**SSHそのものが失敗したとき**（サーバー停止・IP変更・22番の遮断・鍵の失効）は確認スクリプトが走らないので、ランナーから直接Webhookへ「SSHできませんでした」と通知する（`if: failure()` の2つ目のステップ）。
 
 ⭕ このワークフローは検知してもジョブ自体は失敗させない（exit 0で終了）。毎回赤いXが並ぶと通知疲れするため、异常の知らせはDiscordへの一本化だけにしている。
 
@@ -190,7 +190,7 @@ def log_session(note=None, now=None):
 | ファイル | 中身 | 管理 |
 |---|---|---|
 | `seed/game_releases.json` | 初期データ（22作品）。各エントリに出典URL（`source`）と、全体の更新日（`updated`） | Git管理。Dockerイメージに入る |
-| `data/game_releases.json` | 自分で書き足す分 | Git管理外。EC2ではホスト側に残り、バックアップ対象 |
+| `data/game_releases.json` | 自分で書き足す分 | Git管理外。本番サーバーではホスト側に残り、バックアップ対象 |
 
 エントリは `title` / `platforms`（`PC`・`Switch`・`Switch 2`）/ `release_date`（`YYYY-MM-DD`）が必須で、日付が未定なら `release_date` の代わりに `release_label`（例: `2026年内`）を書く。`genre`・`note` は任意。予約の情報は `preorder_start`（予約開始日）と `preorder_note`（特典・価格など）で、**載っていない作品は「予約できない」ではなく「未確認」**として何も表示しない。seed の予約情報には出典（`preorder_source`）を必ず付ける。機種ごとに発売日が違う作品（Steam版だけ1日遅い等）は、日付を分けず `note` に書く。書き間違い（機種名の typo など）のあるエントリは**黙って表示されなくなる**ので、seed は `tests/test_game_logic.py` が全件の読み込みを検査している。
 

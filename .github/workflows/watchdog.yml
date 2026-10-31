@@ -1,11 +1,14 @@
 name: 死活監視 (Watchdog)
 
-# discord-task-bot / keiba-app-new が同じEC2上で動いている前提で、
+# discord-task-bot / keiba-app-new が同じサーバー（さくらのVPS）上で動いている前提で、
 # 15分おきにSSH経由でheartbeatの新しさ・コンテナ状態・keiba-app-newのAPI応答を確認し、
 # 異常があればDiscordのWebhookへ直接通知する（Bot自体が落ちていても届く経路にするため）。
+# Secret名は EC2_HOST / EC2_USER / EC2_SSH_KEY のまま（中身はVPSの値。名前だけ移行前の名残）。
 #
-# ⭕ HTTPサーバーは増やさない。EC2への新しいポート開放やセキュリティグループの変更は不要。
-# ⭕ 異常を検知してもこのジョブ自体は失敗させない（赤いXの通知疲れを避け、Discordへの通知に一本化する）。
+# ⭕ HTTPサーバーは増やさない。サーバーへの新しいポート開放は不要（公開は22番のみ）。
+# ⭕ 「異常を検知した」ときは、このジョブ自体は失敗させない（赤いXの通知疲れを避け、Discordへの通知に一本化する）。
+# ⭕ 一方「サーバーにSSHできない」ときは、確認スクリプトが走らないので上の通知は出せない。
+#    サーバーごと落ちた場合こそ知りたいので、SSHの手順が失敗したときだけ、ランナーから直接Discordへ通知する。
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -15,7 +18,8 @@ jobs:
   watchdog:
     runs-on: ubuntu-latest
     steps:
-      - name: EC2へSSHして死活確認し、異常があればDiscordへ通知
+      - name: サーバーへSSHして死活確認し、異常があればDiscordへ通知
+        id: check
         uses: appleboy/ssh-action@v1.2.0
         env:
           DISCORD_ALERT_WEBHOOK: ${{ secrets.DISCORD_ALERT_WEBHOOK }}
@@ -67,3 +71,18 @@ jobs:
             else
               echo "異常なし"
             fi
+
+      - name: SSHできなかったときは、ランナーから直接Discordへ通知
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          DISCORD_ALERT_WEBHOOK: ${{ secrets.DISCORD_ALERT_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$DISCORD_ALERT_WEBHOOK" ]; then
+            echo "DISCORD_ALERT_WEBHOOK が未設定のため、Discordへの通知はスキップしました"
+            exit 0
+          fi
+          # ⭕ サーバーの停止・IPの変更・22番の遮断・鍵の失効のどれでもここに来る。原因はジョブのログで見分ける。
+          curl -s -H "Content-Type: application/json" \
+            -d "{\"content\": \"🚨 **死活監視アラート**\\nサーバーへSSHできませんでした。サーバーが止まっているか、接続設定（IP・鍵・22番）が変わった可能性があります。\\n原因はこのログの最後のエラー行で分かります: ${RUN_URL}\"}" \
+            "$DISCORD_ALERT_WEBHOOK" > /dev/null

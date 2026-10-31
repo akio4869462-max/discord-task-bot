@@ -89,7 +89,7 @@ def build_deadline_reminders(today_jst):
 async def heartbeat_task():
     """Botが生きている印として、5分おきに時刻をファイルへ書き込みます。
 
-    ⭕ このファイルの新しさをEC2側でSSH経由に確認するだけで「落ちたことに気づける」状態を作る。
+    ⭕ このファイルの新しさをサーバー側でSSH経由に確認するだけで「落ちたことに気づける」状態を作る。
        HTTPサーバーは増やさない（ポート開放やセキュリティグループの変更が要らないようにするため）。
     """
     await client.wait_until_ready()

@@ -7,7 +7,7 @@ name: 個人メトリクス収集 (daily)
 #
 # ⭕ main ブランチには一切pushしない。deploy.yml は main へのpushだけをトリガーにしているため、
 #    このワークフローがどれだけ動いても本番デプロイは走らない。
-# ⭕ 新しいDBやダッシュボード用サーバーは増やさない。既存のSSHシークレットと、すでに公開されている
+# ⭕ 新しいDBやダッシュボード用サーバーは増やさない。既存のSSHシークレットで、サーバー内の
 #    keiba-app-newのAPIを読むだけ。
 on:
   schedule:
@@ -42,8 +42,10 @@ jobs:
           cat /tmp/exam_typing.json
 
       - name: keiba-app-newのバックテスト統計を取得
+        # ⭕ アプリは 127.0.0.1:8080 にだけ公開していて、外からは届かない。サーバーの中でcurlする。
         run: |
-          curl -s --max-time 10 "http://${{ secrets.EC2_HOST }}:8080/api/v1/results/stats" > /tmp/keiba_stats.json || echo "{}" > /tmp/keiba_stats.json
+          ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "curl -s --max-time 10 http://localhost:8080/api/v1/results/stats" > /tmp/keiba_stats.json || echo "{}" > /tmp/keiba_stats.json
           cat /tmp/keiba_stats.json
 
       - name: metrics/daily.json を作成

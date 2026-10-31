@@ -58,7 +58,7 @@
 
 Botが黙って落ちても気づけるよう、`heartbeat_logic.py`が5分おきに`data/heartbeat.txt`へ現在時刻を書き込む。さらに定期タスク・スラッシュコマンド・イベントハンドラで捕捉されなかった例外はすべて`ALERT_CHANNEL_ID`へ通知される。
 
-監視側は別リポジトリを立てず、このリポジトリ自身の`.github/workflows/watchdog.yml`が15分おきにEC2へSSHし、heartbeatの新しさ・コンテナの起動状態・keiba-app-newの`/api/v1`応答の3点を確認し、異常があればDiscordの**Webhook**（Bot自体とは別経路）へ直接通知する。Botが完全に落ちていてもこの通知は届く。
+監視側は別リポジトリを立てず、このリポジトリ自身の`.github/workflows/watchdog.yml`が15分おきに本番サーバー（VPS）へSSHし、heartbeatの新しさ・コンテナの起動状態・keiba-app-newの`/api/v1`応答の3点を確認し、異常があればDiscordの**Webhook**（Bot自体とは別経路）へ直接通知する。Botが完全に落ちていてもこの通知は届く。サーバーにSSHできないときも、ランナーから直接Webhookへ通知する。
 
 使うにはリポジトリのGitHub Secretsに`DISCORD_ALERT_WEBHOOK`（Discordのチャンネル設定→連携サービス→Webhookで作成するURL）を登録する必要がある。未設定の間は検知は動くが通知はスキップされる。
 
@@ -81,7 +81,7 @@ Botが黙って落ちても気づけるよう、`heartbeat_logic.py`が5分お�
 * **Language**: Python 3.11
 * **Library**: discord.py, google-api-python-client（Googleカレンダー連携）
 * **Data Storage**: JSONファイル（`data/`ディレクトリ配下）による軽量ファイルベース永続化
-* **Infrastructure**: Docker（`docker compose up -d`で起動）＋ GitHub Actionsによる EC2 への自動デプロイ（`main`ブランチへのpushをトリガーに、SSH経由で `git pull && docker compose up -d --build` を実行）
+* **Infrastructure**: Docker（`docker compose up -d`で起動）＋ GitHub Actionsによる本番サーバー（さくらのVPS）への自動デプロイ（`main`ブランチへのpushをトリガーに、SSH経由で `git pull && docker compose up -d --build` を実行）
 * **Design Concepts**:
   * マジックナンバーを徹底的に排除した定数管理アーキテクチャ
   * 堅牢なエラーハンドリング（`json.JSONDecodeError`, `IOError`, `ValueError` 等の個別キャッチによるクラッシュ防止）
@@ -112,7 +112,7 @@ Botが黙って落ちても気づけるよう、`heartbeat_logic.py`が5分お�
 ├── requirements-dev.txt # テスト実行に必要な開発用依存ライブラリ
 ├── Dockerfile           # Botの実行イメージ定義
 ├── docker-compose.yml   # コンテナ起動設定（data/ディレクトリをホストとマウント）
-├── .github/workflows/   # GitHub Actionsによる EC2 自動デプロイ・テスト自動実行の設定
+├── .github/workflows/   # GitHub Actionsによる自動デプロイ・テスト自動実行の設定
 └── data/                # 実行時に自動生成されるデータストア（Gitでは追跡しない）
     ├── todo.json            # 登録されたタスク一覧
     ├── stable.json          # 厩舎（現役馬・引退馬・成長の累積分数）
@@ -175,7 +175,7 @@ python main.py
 docker compose up -d --build
 ```
 
-`main`ブランチにpushすると、GitHub Actions経由でEC2上にも自動的に同じ手順でデプロイされます（`.github/workflows/deploy.yml`）。
+`main`ブランチにpushすると、GitHub Actions経由で本番サーバー上にも自動的に同じ手順でデプロイされます（`.github/workflows/deploy.yml`）。
 
 ### 4. テストの実行
 
