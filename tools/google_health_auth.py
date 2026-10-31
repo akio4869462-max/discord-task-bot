@@ -13,7 +13,7 @@
 1回取得して動作を確かめる。⭕ client_secret やトークンは画面に表示しない。
 
 保存先の data/google_health_token.json はあなたの健康データを読める秘密情報。Git管理外で、
-バックアップにも含めない。EC2で使うときは、このファイルを EC2 の ~/discord-task-bot/data/ に置く。
+バックアップにも含めない。本番サーバー（VPS）で使うときは、このファイルを ~/discord-task-bot/data/ に置く。
 """
 
 import base64
