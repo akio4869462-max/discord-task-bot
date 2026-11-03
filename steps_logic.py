@@ -145,8 +145,9 @@ def get_weekly_steps_summary(today=None, data=None):
         return ""
 
     best_day, best_steps = last['best']
+    best_day = f"{int(best_day[5:7])}/{int(best_day[8:10])}"      # 11/2（ゼロ埋めしない）
     msg = (f"\n👟 先週の歩数: 合計 {last['total']:,}歩 ／ 1日平均 {last['average']:,}歩"
-           f"（記録のある{last['days']}日）\n　最多は {best_day[5:].replace('-', '/')} の {best_steps:,}歩")
+           f"（記録のある{last['days']}日）\n　最多は {best_day} の {best_steps:,}歩")
 
     prev = summarize_period(today - timedelta(days=14), today - timedelta(days=8), data)
     if prev['average']:
