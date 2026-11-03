@@ -90,3 +90,107 @@ def log_steps(steps, now=None, source='manual'):
     if steps > STEPS_DAILY_CAP:
         msg += f"\n（調教に反映されるのは1日{STEPS_DAILY_CAP:,}歩までです）"
     return msg, credit
+
+
+# ====================================================
+# 集計
+# ====================================================
+
+# 日次メトリクスに載せる日ごとの歩数の期間
+METRICS_DAYS = 30
+
+
+def summarize_period(start, end, data=None):
+    """start〜end（両端を含む）の歩数を集計します。
+
+    ⭕ 記録の無い日は0歩ではなく「データ無し」。平均は記録のある日だけで割る
+       （端末が未同期の日や、連携が動く前の日を0歩として混ぜると、平均が実態より下がる）。
+
+    Returns:
+        dict: {'days': 記録のある日数, 'total': 合計, 'average': 1日平均（記録が無ければ0）,
+               'best': (日付文字列, 歩数)。記録が無ければ None}
+    """
+    data = data if data is not None else load_steps_data()
+    rows = []
+    day = start
+    while day <= end:
+        entry = data['days'].get(day.strftime('%Y-%m-%d'))
+        if isinstance(entry, dict) and isinstance(entry.get('steps'), int):
+            rows.append((day.strftime('%Y-%m-%d'), entry['steps']))
+        day += timedelta(days=1)
+
+    total = sum(steps for _, steps in rows)
+    return {
+        'days': len(rows),
+        'total': total,
+        'average': round(total / len(rows)) if rows else 0,
+        'best': max(rows, key=lambda r: r[1]) if rows else None,
+    }
+
+
+def get_weekly_steps_summary(today=None, data=None):
+    """週間サマリーに追記する、先週（直前の7日間）の歩数の文言を返します。
+
+    Args:
+        today (date, optional): 基準日（省略時は今日。テスト用の注入口）。月曜の朝に呼ぶ想定で、
+            今日を含めない直前の7日間（月〜日）を「先週」とする。
+
+    Returns:
+        str: 先頭が改行の文言。先週の記録が1日も無ければ空文字。
+    """
+    today = today or datetime.now(JST).date()
+    data = data if data is not None else load_steps_data()
+    last = summarize_period(today - timedelta(days=7), today - timedelta(days=1), data)
+    if not last['days']:
+        return ""
+
+    best_day, best_steps = last['best']
+    msg = (f"\n👟 先週の歩数: 合計 {last['total']:,}歩 ／ 1日平均 {last['average']:,}歩"
+           f"（記録のある{last['days']}日）\n　最多は {best_day[5:].replace('-', '/')} の {best_steps:,}歩")
+
+    prev = summarize_period(today - timedelta(days=14), today - timedelta(days=8), data)
+    if prev['average']:
+        diff = round((last['average'] - prev['average']) / prev['average'] * 100)
+        if diff > 0:
+            msg += f"\n📈 1日平均は、前の週より {diff}% 多くなりました。"
+        elif diff < 0:
+            msg += f"\n📉 1日平均は、前の週より {abs(diff)}% 少なめでした。"
+    return msg
+
+
+def metrics_summary(today=None, data=None):
+    """日次メトリクス（進捗ダッシュボード用）に載せる歩数の集計を返します。
+
+    Returns:
+        dict: {'asOf': 基準日（YYYY-MM-DD。グラフの右端）,
+               'recordedDays': 記録のある日の総数, 'totalAll': 全期間の合計,
+               'last7': 直近7日, 'prev7': その前の7日, 'daily': 直近METRICS_DAYS日の記録のある日だけ}
+               last7/prev7 は summarize_period と同じ形（best は [日付, 歩数] か None）。
+    """
+    today = today or datetime.now(JST).date()
+    data = data if data is not None else load_steps_data()
+    start = today - timedelta(days=METRICS_DAYS - 1)
+
+    def span(first, last):
+        s = summarize_period(first, last, data)
+        return {**s, 'best': list(s['best']) if s['best'] else None}
+
+    daily = []
+    day = start
+    while day <= today:
+        key = day.strftime('%Y-%m-%d')
+        entry = data['days'].get(key)
+        if isinstance(entry, dict) and isinstance(entry.get('steps'), int):
+            daily.append({'date': key, 'steps': entry['steps']})
+        day += timedelta(days=1)
+
+    all_rows = [e['steps'] for e in data['days'].values()
+                if isinstance(e, dict) and isinstance(e.get('steps'), int)]
+    return {
+        'asOf': today.strftime('%Y-%m-%d'),
+        'recordedDays': len(all_rows),
+        'totalAll': sum(all_rows),
+        'last7': span(today - timedelta(days=6), today),
+        'prev7': span(today - timedelta(days=13), today - timedelta(days=7)),
+        'daily': daily,
+    }

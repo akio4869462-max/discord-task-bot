@@ -35,7 +35,7 @@ jobs:
         env:
           # metrics_script.py をbase64化したもの。docker exec先のコンテナへ
           # stdin経由で渡して実行する（シェルの引用符エスケープ地獄を避けるため）。
-          SCRIPT_B64: aW1wb3J0IGpzb24KaW1wb3J0IGV4YW1fbG9naWMKaW1wb3J0IHR5cGluZ19sb2dpYwoKZXhhbV9kYXRhID0gZXhhbV9sb2dpYy5sb2FkX2V4YW1fZGF0YSgpCnNlc3Npb25zID0gZXhhbV9kYXRhLmdldCgic2Vzc2lvbnMiLCBbXSkKZXhhbV9zdGF0cyA9IGV4YW1fbG9naWMuYWdncmVnYXRlX2J5X2ZpZWxkKHNlc3Npb25zKQp0b3RhbF9hbGwgPSBzdW0oZVsidG90YWwiXSBmb3IgZSBpbiBleGFtX3N0YXRzLnZhbHVlcygpKQpjb3JyZWN0X2FsbCA9IHN1bShlWyJjb3JyZWN0Il0gZm9yIGUgaW4gZXhhbV9zdGF0cy52YWx1ZXMoKSkKcmF0ZV9hbGwgPSByb3VuZChjb3JyZWN0X2FsbCAvIHRvdGFsX2FsbCAqIDEwMCkgaWYgdG90YWxfYWxsIGVsc2UgMAoKdHlwaW5nX2RhdGEgPSB0eXBpbmdfbG9naWMubG9hZF90eXBpbmdfZGF0YSgpCm1lYXN1cmVtZW50cyA9IHR5cGluZ19kYXRhLmdldCgibWVhc3VyZW1lbnRzIiwgW10pCmxhdGVzdCA9IG1lYXN1cmVtZW50c1stMV0gaWYgbWVhc3VyZW1lbnRzIGVsc2UgTm9uZQoKcmVzdWx0ID0gewogICAgImV4YW0iOiB7CiAgICAgICAgInRvdGFsQWxsIjogdG90YWxfYWxsLAogICAgICAgICJjb3JyZWN0QWxsIjogY29ycmVjdF9hbGwsCiAgICAgICAgInJhdGVBbGwiOiByYXRlX2FsbCwKICAgICAgICAiYnlGaWVsZCI6IGV4YW1fc3RhdHMsCiAgICAgICAgImZpZWxkTmFtZXMiOiBleGFtX2xvZ2ljLkVYQU1fRklFTERTLAogICAgfSwKICAgICJ0eXBpbmciOiB7CiAgICAgICAgImN1cnJlbnREcmlsbCI6IHR5cGluZ19kYXRhLmdldCgiY3VycmVudF9kcmlsbCIpLAogICAgICAgICJjdXJyZW50U3RyZWFrIjogdHlwaW5nX2RhdGEuZ2V0KCJjdXJyZW50X3N0cmVhayIpLAogICAgICAgICJsYXN0UHJhY3RpY2VEYXRlIjogdHlwaW5nX2RhdGEuZ2V0KCJsYXN0X3ByYWN0aWNlX2RhdGUiKSwKICAgICAgICAibGF0ZXN0TWVhc3VyZW1lbnQiOiBsYXRlc3QsCiAgICAgICAgImJhc2VsaW5lIjogdHlwaW5nX2xvZ2ljLkJBU0VMSU5FLAogICAgfSwKfQpwcmludChqc29uLmR1bXBzKHJlc3VsdCwgZW5zdXJlX2FzY2lpPUZhbHNlKSkK
+          SCRIPT_B64: aW1wb3J0IGpzb24KaW1wb3J0IGV4YW1fbG9naWMKaW1wb3J0IHN0ZXBzX2xvZ2ljCmltcG9ydCB0eXBpbmdfbG9naWMKCmV4YW1fZGF0YSA9IGV4YW1fbG9naWMubG9hZF9leGFtX2RhdGEoKQpzZXNzaW9ucyA9IGV4YW1fZGF0YS5nZXQoInNlc3Npb25zIiwgW10pCmV4YW1fc3RhdHMgPSBleGFtX2xvZ2ljLmFnZ3JlZ2F0ZV9ieV9maWVsZChzZXNzaW9ucykKdG90YWxfYWxsID0gc3VtKGVbInRvdGFsIl0gZm9yIGUgaW4gZXhhbV9zdGF0cy52YWx1ZXMoKSkKY29ycmVjdF9hbGwgPSBzdW0oZVsiY29ycmVjdCJdIGZvciBlIGluIGV4YW1fc3RhdHMudmFsdWVzKCkpCnJhdGVfYWxsID0gcm91bmQoY29ycmVjdF9hbGwgLyB0b3RhbF9hbGwgKiAxMDApIGlmIHRvdGFsX2FsbCBlbHNlIDAKCnR5cGluZ19kYXRhID0gdHlwaW5nX2xvZ2ljLmxvYWRfdHlwaW5nX2RhdGEoKQptZWFzdXJlbWVudHMgPSB0eXBpbmdfZGF0YS5nZXQoIm1lYXN1cmVtZW50cyIsIFtdKQpsYXRlc3QgPSBtZWFzdXJlbWVudHNbLTFdIGlmIG1lYXN1cmVtZW50cyBlbHNlIE5vbmUKCnJlc3VsdCA9IHsKICAgICJleGFtIjogewogICAgICAgICJ0b3RhbEFsbCI6IHRvdGFsX2FsbCwKICAgICAgICAiY29ycmVjdEFsbCI6IGNvcnJlY3RfYWxsLAogICAgICAgICJyYXRlQWxsIjogcmF0ZV9hbGwsCiAgICAgICAgImJ5RmllbGQiOiBleGFtX3N0YXRzLAogICAgICAgICJmaWVsZE5hbWVzIjogZXhhbV9sb2dpYy5FWEFNX0ZJRUxEUywKICAgIH0sCiAgICAidHlwaW5nIjogewogICAgICAgICJjdXJyZW50RHJpbGwiOiB0eXBpbmdfZGF0YS5nZXQoImN1cnJlbnRfZHJpbGwiKSwKICAgICAgICAiY3VycmVudFN0cmVhayI6IHR5cGluZ19kYXRhLmdldCgiY3VycmVudF9zdHJlYWsiKSwKICAgICAgICAibGFzdFByYWN0aWNlRGF0ZSI6IHR5cGluZ19kYXRhLmdldCgibGFzdF9wcmFjdGljZV9kYXRlIiksCiAgICAgICAgImxhdGVzdE1lYXN1cmVtZW50IjogbGF0ZXN0LAogICAgICAgICJiYXNlbGluZSI6IHR5cGluZ19sb2dpYy5CQVNFTElORSwKICAgIH0sCiAgICAjIOKtlSDjg4fjg5fjg63jgqTliY3jga7lj6TjgYTjgrPjg7Pjg4bjg4rjgafjgoLjgIHml6XmrKHjg6Hjg4jjg6rjgq/jgrnlhajkvZPjgpLokL3jgajjgZXjgarjgYQKICAgICJzdGVwcyI6IHN0ZXBzX2xvZ2ljLm1ldHJpY3Nfc3VtbWFyeSgpIGlmIGhhc2F0dHIoc3RlcHNfbG9naWMsICJtZXRyaWNzX3N1bW1hcnkiKSBlbHNlIE5vbmUsCn0KcHJpbnQoanNvbi5kdW1wcyhyZXN1bHQsIGVuc3VyZV9hc2NpaT1GYWxzZSkpCg==
         run: |
           echo "$SCRIPT_B64" | ssh -o StrictHostKeyChecking=no "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
             "base64 -d | docker exec -i discord-task-bot python3 -" > /tmp/exam_typing.json
@@ -62,10 +62,14 @@ jobs:
           except json.JSONDecodeError:
               keiba_stats = None
 
+          # steps は応用情報・タイピングとは別の項目として、トップレベルへ出す
+          steps = exam_typing.pop("steps", None)
+
           out = {
               "updatedAt": datetime.now(timezone.utc).isoformat(),
               "examTyping": exam_typing,
               "keibaBacktest": keiba_stats,
+              "steps": steps,
           }
 
           with open('/tmp/daily.json', 'w', encoding='utf-8') as f:

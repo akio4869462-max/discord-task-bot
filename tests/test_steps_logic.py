@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+import json
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
@@ -89,3 +90,108 @@ def test_source_is_kept_so_imports_can_be_told_apart_from_manual_entries():
 
     sl.log_steps(7000, now=DAY, source='healthkit')
     assert sl.load_steps_data()['days']['2026-10-17']['source'] == 'healthkit'
+
+
+# ====================================================
+# 集計（週間サマリー・日次メトリクス）
+# ====================================================
+
+MONDAY = date(2026, 11, 2)          # 月曜の朝。先週は 10/26(月)〜11/1(日)
+
+
+def put(day, steps):
+    sl.log_steps(steps, now=datetime.combine(day, time(21, 0), tzinfo=sl.JST))
+
+
+def test_summarize_period_averages_only_the_days_that_have_data():
+    """⭕ 記録の無い日は0歩ではない。平均に0を混ぜると、未同期の日のぶん実態より下がる。"""
+    put(date(2026, 10, 26), 3000)
+    put(date(2026, 10, 28), 5000)
+
+    result = sl.summarize_period(date(2026, 10, 26), date(2026, 11, 1))
+
+    assert result['days'] == 2
+    assert result['total'] == 8000
+    assert result['average'] == 4000
+    assert result['best'] == ('2026-10-28', 5000)
+
+
+def test_summarize_period_without_records_is_empty_not_an_error():
+    result = sl.summarize_period(date(2026, 10, 26), date(2026, 11, 1))
+    assert result == {'days': 0, 'total': 0, 'average': 0, 'best': None}
+
+
+def test_summarize_period_includes_both_ends_and_excludes_outside():
+    put(date(2026, 10, 25), 9999)       # 範囲の前日
+    put(date(2026, 10, 26), 1000)       # 初日
+    put(date(2026, 11, 1), 2000)        # 最終日
+    put(date(2026, 11, 2), 9999)        # 範囲の翌日
+
+    assert sl.summarize_period(date(2026, 10, 26), date(2026, 11, 1))['total'] == 3000
+
+
+def test_weekly_summary_is_silent_without_last_weeks_records():
+    """⭕ 連携が動く前の週や、端末がずっと未同期の週に「0歩」と出してはいけない。"""
+    put(MONDAY, 5000)                    # 今日ぶんだけ（先週ではない）
+    assert sl.get_weekly_steps_summary(MONDAY) == ''
+
+
+def test_weekly_summary_reports_total_average_and_best_day():
+    put(date(2026, 10, 26), 3000)
+    put(date(2026, 10, 27), 6000)
+    put(date(2026, 11, 1), 4500)
+
+    msg = sl.get_weekly_steps_summary(MONDAY)
+
+    assert msg.startswith('\n')                          # 他の週間サマリーの追記と同じ形
+    assert '合計 13,500歩' in msg
+    assert '1日平均 4,500歩' in msg
+    assert '記録のある3日' in msg
+    assert '10/27' in msg and '6,000歩' in msg
+
+
+def test_weekly_summary_compares_daily_averages_with_the_week_before():
+    put(date(2026, 10, 20), 4000)        # 前の週（10/19〜10/25）
+    put(date(2026, 10, 27), 6000)        # 先週
+
+    assert '50% 多く' in sl.get_weekly_steps_summary(MONDAY)
+
+    put(date(2026, 10, 21), 12000)       # 前の週の平均が 8,000 に上がる
+    assert '25% 少なめ' in sl.get_weekly_steps_summary(MONDAY)
+
+
+def test_weekly_summary_has_no_comparison_when_the_week_before_has_no_data():
+    put(date(2026, 10, 27), 6000)
+    assert '前の週' not in sl.get_weekly_steps_summary(MONDAY)
+
+
+def test_metrics_summary_is_json_serializable_and_shaped_for_the_dashboard():
+    put(date(2026, 10, 20), 2000)
+    put(date(2026, 10, 30), 3000)
+    put(date(2026, 11, 2), 4000)
+
+    result = sl.metrics_summary(date(2026, 11, 2))
+    json.dumps(result)                                   # 例外が出ないこと自体が検査
+
+    assert result['asOf'] == '2026-11-02'                # グラフの右端。記録の無い日が続いても窓がずれない
+    assert result['recordedDays'] == 3
+    assert result['totalAll'] == 9000
+    assert result['last7']['total'] == 7000              # 10/27〜11/2
+    assert result['last7']['best'] == ['2026-11-02', 4000]
+    assert result['prev7']['total'] == 2000 and result['prev7']['days'] == 1   # 10/20〜10/26
+    assert [d['date'] for d in result['daily']] == ['2026-10-20', '2026-10-30', '2026-11-02']
+
+
+def test_metrics_summary_daily_is_limited_to_the_recent_window():
+    put(date(2026, 9, 1), 1000)          # 30日より前
+    put(date(2026, 11, 2), 4000)
+
+    daily = sl.metrics_summary(date(2026, 11, 2))['daily']
+
+    assert [d['date'] for d in daily] == ['2026-11-02']
+
+
+def test_metrics_summary_with_no_records_is_empty():
+    result = sl.metrics_summary(date(2026, 11, 2))
+    assert result['recordedDays'] == 0 and result['daily'] == []
+    assert result['last7']['best'] is None
