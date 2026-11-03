@@ -51,7 +51,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `review_logic.py` | 過去問の復習ノート（間違えた問題・キーワード・復習の4段階） | `data/review_data.json` |
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
-| `steps_logic.py` | 日ごとの歩数の記録（同じ日の再入力は差分だけを調教に数える） | `data/steps_data.json` |
+| `steps_logic.py` | 日ごとの歩数の記録（同じ日の再入力は差分だけを調教に数える）と、週間・日次メトリクス向けの集計 | `data/steps_data.json` |
 | `google_health_logic.py` | Google Health API から日ごとの歩数を取り込む（認証・取得・`steps_logic` への流し込み） | `data/google_health_token.json`（秘密情報。バックアップ対象外） |
 | `game_logic.py` | 新作ゲーム（PC/Switch/Switch 2）の発売予定の読み込み・絞り込み・整形 | `seed/game_releases.json`（初期データ）＋ `data/game_releases.json`（追記分） |
 | `calendar_logic.py` | Googleカレンダーへの期限同期（任意） | `data/service_account.json` |
@@ -177,6 +177,7 @@ def log_session(note=None, now=None):
 - ⭕ **「データが無い」は0歩ではない。** 端末が未同期の日はAPIが何も返さないので、何も記録しない（`None`）。0歩として記録しない。
 - ⭕ 同じ日の合計を何度取り込んでも、`steps_logic` が差分だけを数えるので二重加算されない（20:00の途中経過→翌朝の確定値、手入力との併用も同じ）。昨日ぶんの取り込みは連続記録（streak）を動かさない（`process_walking(update_streak=False)`）。
 - ⭕ **取り込みの失敗は `main.sync_steps_or_alert` で必ず受け止める。** 配信ループは全機能で1つを共有しているため、ここから例外が漏れるとニュースもレース実行もループごと止まる。
+- ⭕ **集計は `steps_logic` にある。** 月曜朝の週間サマリーに、先週（直前の月〜日）の合計・1日平均・最多の日・前の週との比較を足す（`get_weekly_steps_summary`）。日次メトリクス（`metrics.yml`）は `metrics_summary` の結果を `daily.json` の `steps` に載せる。**平均は「記録のある日」だけで割る**（記録の無い日は0歩ではない）。先週の記録が1日も無ければ週間サマリーには何も足さない。
 - 通信は標準ライブラリの `urllib`（依存を増やさない）で、`asyncio.to_thread` から呼ぶ。エンドポイントやリクエストの形は公式ドキュメント（`developers.google.com/health`）による。このAPIは発展途中で、変更に追従が必要になることがある。
 
 ## 新作ゲーム紹介

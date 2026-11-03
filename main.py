@@ -17,6 +17,7 @@ import heartbeat_logic
 import horse_logic
 import news_logic
 import review_logic
+import steps_logic
 import task_logic
 import training_logic
 import typing_logic
@@ -213,6 +214,7 @@ async def xml_news_delivery_task():
             summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
             summary_msg += exam_logic.get_weekly_exam_summary()
             summary_msg += typing_logic.get_weekly_typing_summary()
+            summary_msg += steps_logic.get_weekly_steps_summary(now_jst.date())
             await task_channel.send(summary_msg)
 
     # 🌃 夜の配信（20:00）
@@ -400,6 +402,7 @@ async def test_reminder_command(interaction: discord.Interaction):
         summary_msg += f"\n💪 今週のトレーニング実施率: {completed}/{scheduled}日"
         summary_msg += exam_logic.get_weekly_exam_summary()
         summary_msg += typing_logic.get_weekly_typing_summary()
+        summary_msg += steps_logic.get_weekly_steps_summary()
         await task_channel.send(f"🧪 **【デバッグ】週間サマリーのテスト配信**\n{summary_msg}")
 
 
