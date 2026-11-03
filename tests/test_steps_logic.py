@@ -150,6 +150,15 @@ def test_weekly_summary_reports_total_average_and_best_day():
     assert '10/27' in msg and '6,000歩' in msg
 
 
+def test_weekly_summary_writes_the_best_day_without_zero_padding():
+    put(date(2026, 11, 1), 4000)         # 月も日も1桁にならない日と、1桁の日の両方を確かめる
+    put(date(2026, 10, 27), 3000)
+    assert '最多は 11/1 の 4,000歩' in sl.get_weekly_steps_summary(MONDAY)
+
+    put(date(2026, 10, 29), 9000)
+    assert '最多は 10/29 の 9,000歩' in sl.get_weekly_steps_summary(MONDAY)
+
+
 def test_weekly_summary_compares_daily_averages_with_the_week_before():
     put(date(2026, 10, 20), 4000)        # 前の週（10/19〜10/25）
     put(date(2026, 10, 27), 6000)        # 先週
