@@ -5,15 +5,25 @@ from discord import app_commands
 from discord.ui import View, Select
 
 import exam_logic
+import study_logic
 from ui_review import ReviewMenuView
-from bot_state import tree
+from ui_study import StudyTopicModal
+from bot_state import tree, active_focus_timers
 from ui_common import parse_positive_int, process_exam_completion
 
 
 class ExamMenuView(View):
-    """「資格学習」サブメニュー：過去問演習の記録・成績確認をまとめたView"""
+    """「資格学習」サブメニュー：過去問演習の記録・成績確認・学習タイマーをまとめたView"""
     def __init__(self):
         super().__init__(timeout=60)
+
+    @discord.ui.button(label="⏱️ 学習タイマー", style=discord.ButtonStyle.primary, row=0)
+    async def timer_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 分野は選ばない。何でも使える25分タイマーで、内容は自由な一言（任意）
+        if interaction.user.id in active_focus_timers:
+            await interaction.response.send_message("既にタイマーが動いています。", ephemeral=True)
+            return
+        await interaction.response.send_modal(StudyTopicModal())
 
     @discord.ui.button(label="📝 演習を記録", style=discord.ButtonStyle.primary, row=0)
     async def log_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -24,6 +34,10 @@ class ExamMenuView(View):
     @discord.ui.button(label="📊 演習成績", style=discord.ButtonStyle.secondary, row=0)
     async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(exam_logic.get_stats_summary(), ephemeral=True)
+
+    @discord.ui.button(label="📈 学習時間", style=discord.ButtonStyle.secondary, row=1)
+    async def study_stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(study_logic.get_stats_summary(), ephemeral=True)
 
     @discord.ui.button(label="📚 復習ノート", style=discord.ButtonStyle.success, row=1)
     async def review_btn(self, interaction: discord.Interaction, button: discord.ui.Button):

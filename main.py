@@ -41,6 +41,7 @@ import ui_task
 import ui_horse
 import ui_news
 import ui_exam
+import ui_study
 import ui_training
 import ui_typing
 import ui_utility
