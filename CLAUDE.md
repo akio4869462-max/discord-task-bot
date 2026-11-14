@@ -48,6 +48,7 @@ PYTHONIOENCODING=utf-8 python -m pytest -q
 | `race_sim/calendar.py` | 番組表（土曜・水曜の開催） | — |
 | `news_logic.py` | RSS取得・既知語フィルタ・未知語検出 | `data/news_keywords.json`（読み: `data/glossary.json` も） |
 | `exam_logic.py` | 応用情報の分野別演習記録 | `data/exam_data.json` |
+| `study_logic.py` | 学習タイマー（25分）の記録と、今日・今週・内容別の集計 | `data/study_data.json` |
 | `review_logic.py` | 過去問の復習ノート（間違えた問題・キーワード・復習の4段階） | `data/review_data.json` |
 | `training_logic.py` | 筋トレメニュー（毎日同一・月曜休養）・記録 | `data/training_data.json` |
 | `typing_logic.py` | タイピング訓練のドリル進行・計測 | `data/typing_data.json` |
@@ -179,6 +180,15 @@ def log_session(note=None, now=None):
 - ⭕ **取り込みの失敗は `main.sync_steps_or_alert` で必ず受け止める。** 配信ループは全機能で1つを共有しているため、ここから例外が漏れるとニュースもレース実行もループごと止まる。
 - ⭕ **集計は `steps_logic` にある。** 月曜朝の週間サマリーに、先週（直前の月〜日）の合計・1日平均・最多の日・前の週との比較を足す（`get_weekly_steps_summary`）。日次メトリクス（`metrics.yml`）は `metrics_summary` の結果を `daily.json` の `steps` に載せる。**平均は「記録のある日」だけで割る**（記録の無い日は0歩ではない）。先週の記録が1日も無ければ週間サマリーには何も足さない。
 - 通信は標準ライブラリの `urllib`（依存を増やさない）で、`asyncio.to_thread` から呼ぶ。エンドポイントやリクエストの形は公式ドキュメント（`developers.google.com/health`）による。このAPIは発展途中で、変更に追従が必要になることがある。
+
+## 学習タイマー（25分）
+
+`/study timer`（または 資格学習メニューの「⏱️ 学習タイマー」）で始める何にでも使える25分タイマー。**分野は選ばない**（応用情報の演習記録とは別物で、分野分けは `exam_logic` の演習記録だけが持つ）。内容は自由な一言（任意・40字まで）。25分たつと、自動で `data/study_data.json` に記録し、馬の育成（賢さ）にも時間ぶん反映して、チャンネルに知らせる。`/study stats`（メニューの「📈 学習時間」）で、今日・今週・累計と内容別の合計を見られる。
+
+- ⭕ **記録はタイマーが終わったときだけ。** キャンセルしたら何も記録せず、何も送らない。育成への反映が失敗しても、学習の記録と知らせは落とさない（記録を先に書く）。
+- ⭕ 管理表は、開発の「⏱️ 集中タイマー」と同じ `bot_state.active_focus_timers`。ふたつを同時には動かさない。
+- ⭕ タイマーはBotのプロセス内（`asyncio.Task`）で動く。デプロイや再起動の最中だった分は消えて、記録も知らせも出ない（集中タイマーと同じ制約）。
+- 週は月曜はじまり（週間サマリーと同じ）。記録に「未来の日付」が紛れても、今週には混ぜない。
 
 ## 新作ゲーム紹介
 
